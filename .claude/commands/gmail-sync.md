@@ -1,5 +1,11 @@
 # /gmail-sync - Sync Application Status from Gmail
 
+**Archive identity:** follow **Stable application identity and submitted
+revisions** in `documents/README.md`. Preserve additive identity columns and
+prefer explicit application/archive links in every read/write. An email that
+could refer to multiple application IDs needs human disambiguation; never
+guess a reapplication from company/role alone.
+
 You are scanning the user's Gmail for status signals on tracked job applications (interview invites, assessment links, offers, rejections) and, once approved, writing the detected changes into `job_search_tracker.csv` and `documents/applications/<company>_<role>/outcome.md` - the same two places `/outcome` writes to, in the same schema.
 
 Unlike `/outcome` (which asks the user what happened), `/gmail-sync` classifies real emails on its own - but it never writes on its own. Every classified change is presented as a batch **before** anything touches the tracker or `outcome.md`, and only proceeds once the user approves it (approving the whole batch at once is fine; writing first and flagging it after is not). Because a wrong write silently corrupts application history that `/setup` later calibrates from, every proposed change must cite its source email and every uncertain case must be surfaced instead of guessed. Never treat this command's job as "notice something in an inbox" - it is "propose a correct, sourced line for a permanent record, and write it only once the user says yes."

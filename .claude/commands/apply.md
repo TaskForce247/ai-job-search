@@ -1,5 +1,13 @@
 # /apply - Drafter-Reviewer Job Application Workflow
 
+**Archive identity:** apply the **Stable application identity and submitted
+revisions** contract in `documents/README.md` to every tracker/archive step
+below. Explicit application links take precedence over legacy derived paths
+and company/role matching. Preserve submitted revisions when re-drafting.
+For the local graphical transport, also load
+`.claude/skills/job-application-assistant/10-local-app-transport.md`; the
+checkpoint interface does not change this workflow's order or quality gates.
+
 You are orchestrating a two-agent job application workflow. The job posting is provided below as `$ARGUMENTS` (either a URL or pasted text).
 
 Follow these steps **exactly in order**. Do not skip steps.

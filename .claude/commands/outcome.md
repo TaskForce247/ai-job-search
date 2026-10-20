@@ -1,5 +1,11 @@
 # /outcome - Record the Result of an Application
 
+**Archive identity:** follow **Stable application identity and submitted
+revisions** in `documents/README.md` throughout this command. Prefer explicit
+`application_id`/`archive_dir`, including when selecting rows or locating
+submitted files; use exact legacy derivation only for unlinked old records.
+Multiple applications at one company/role require an explicit record selection.
+
 You are recording what happened to a job application: progress updates (interview invitations, stages completed, offers) and final resolutions (hired, rejected, no response). The data lands in two places the framework already reads but nothing systematically writes:
 
 - `job_search_tracker.csv` - the status column that `/scrape` and `/rank` use for dedup and exclusion

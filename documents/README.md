@@ -150,6 +150,47 @@ applications/
 └── consultco_ai_consultant/
 ```
 
+### Stable application identity and submitted revisions
+
+The legacy `<company>_<role>` rule above remains the fallback for old records.
+New records add `application_id` and `archive_dir` columns to the tracker, after
+the existing columns. `application_id` is a UUID. A new archive uses
+`<legacy-prefix>__<uuid-hex>`: take the first 96 characters of the sanitized,
+nonempty legacy prefix above, append two underscores, then the UUID's 32
+lowercase hexadecimal digits without hyphens. Store the workspace-relative
+folder in `archive_dir`. Generate identity once per application, not per job,
+company, role, render, or status update.
+
+Every archive reader/writer must prefer that explicit `archive_dir` and match
+`application_id`. Validate that the resolved folder stays under
+`documents/applications/`, without links or junctions. Only records lacking an
+explicit link fall back to the exact legacy derivation. Never rename legacy
+folders automatically, fuzzy-attach a sibling role, or share one archive
+between reapplications. Present missing-ID migrations for confirmation before
+writing them; ambiguous legacy matches require user selection.
+
+Re-drafting the *same* application preserves its ID, submission date and status.
+A separate application, including a reapplication to the same employer/role,
+gets a new UUID and archive. When intent is unclear, ask before changing an
+existing record. Company/role matching alone is not a unique record selector.
+
+The optional `application.json` stores typed draft content, evaluation,
+verification, artifact links and a `submitted_revisions` list. Draft artifacts
+live under `drafts/<revision>/`. Recording actual submission freezes the exact
+CV, cover letter and content under `submissions/<submission-id>/`, including a
+`submission.json` manifest with file hashes. These submitted files are immutable.
+The tracker document links and legacy `cv_draft.tex`/`cover_letter.tex` copies
+then refer to the material actually submitted. Later draft generation must not
+replace those copies or move a submitted tracker row back to `drafted`.
+
+Interview, follow-up and calibration readers use the selected submitted
+revision when present; absent a selection, use the latest recorded submission,
+then fall back to the legacy named files. Never use a newer unsubmitted draft
+as evidence of what the employer received.
+
+`drafted` is not a submission and does not start response/follow-up clocks.
+Keep the tracker status vocabulary distinct from the `outcome.md` enum below.
+
 ### Files within each application folder
 
 **`job_posting.md`** — The full job posting text, written by `/apply`, or paste it here. Used by `/setup` to infer which skills and role types you have targeted, and to calibrate `04-job-evaluation.md`.

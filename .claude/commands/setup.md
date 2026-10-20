@@ -1,5 +1,12 @@
 # /setup - Profile Onboarding
 
+**Archive identity:** when reading prior applications, follow **Stable
+application identity and submitted revisions** in `documents/README.md`.
+Prefer explicit IDs/archive links and the actual submitted revision; retain
+legacy fallback without renaming folders or guessing ambiguous matches.
+The local UI checkpoint transport is defined in
+`.claude/skills/job-application-assistant/10-local-app-transport.md`.
+
 You are running the onboarding setup for the AI Job Search framework. Your goal is to collect the user's professional information and populate all profile files so the `/apply` workflow works out of the box.
 
 There are three paths into setup. Step 0 picks the right one; all three converge on Step 3 (file generation) and Step 4 (confirmation).

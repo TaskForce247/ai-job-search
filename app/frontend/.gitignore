@@ -1,0 +1,7 @@
+node_modules/
+dist/
+coverage/
+*.local
+playwright-report/
+test-results/
+.playwright-browsers/

@@ -59,7 +59,22 @@ files ready    with fit ratings     (LaTeX, tailored)
 
 The framework encodes career guidance best practices, including structured evaluation criteria, forward-looking cover letter framing, and optional salary benchmarking.
 
-## Prerequisites
+## Local browser app
+
+A local, single-user browser interface is available as a **development preview**
+in [`app`](app/README.md): guided profile setup, job search/import, assessments and
+approvals, CV/cover-letter editing with PDF previews, application tracking, and
+backup/restore. It runs on your own computer, not a hosted website. The optional
+Windows launcher only opens and manages the local website.
+
+The browser app uses an Anthropic API key stored in the OS credential store;
+ordinary users do not operate Claude Code or another CLI. API billing and cloud
+data-sharing consent are separate from a Claude subscription. See the
+[application guide](app/README.md) for building/running the preview and the
+remaining live-provider, document-toolchain, clean-machine, and usability release
+checks. The original CLI workflow below remains supported.
+
+## Prerequisites (CLI workflow)
 
 - [Claude Code](https://claude.com/claude-code) (CLI). Claude Code has no free tier: you need a Claude Pro/Max/Team subscription or Anthropic API credits (pay-per-token, usually cheaper for occasional use). Using a different agent tool (Codex, Antigravity, Gemini CLI)? Start at [`AGENTS.md`](AGENTS.md) - the portal search skills work there out of the box, and [community forks](https://github.com/MadsLorentzen/ai-job-search/discussions/78) adapt the full workflow.
 - Python 3.10+

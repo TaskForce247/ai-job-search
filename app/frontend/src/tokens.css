@@ -1,0 +1,16 @@
+:root {
+  --canvas: #f7f6f2;
+  --surface: #fffffd;
+  --muted-surface: #f0f2ed;
+  --ink: #25332e;
+  --muted: #59695f;
+  --green: #2c6049;
+  --green-dark: #214b38;
+  --green-pale: #edf3e9;
+  --border: #e0e4d9;
+  --border-strong: #c5cfc1;
+  --focus: #267260;
+  --red: #a13739;
+  --font: "Segoe UI", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  --mono: "Cascadia Code", Consolas, ui-monospace, monospace;
+}
