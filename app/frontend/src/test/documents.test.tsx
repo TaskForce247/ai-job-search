@@ -1,9 +1,12 @@
-import { screen, waitFor, within } from '@testing-library/react';
+import { act, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { DocumentChecks, DocumentEditor } from '../components/DocumentEditor';
 import { PdfPreview } from '../components/PdfPreview';
-import { documentFixture, profileFixture } from './fixtures';
+import { ApplicationDetailPage } from '../pages/Applications';
+import type { Run } from '../types';
+import { applicationFixture, documentFixture, profileFixture, runFixture, workspaceFixture } from './fixtures';
 import { fetchFixtures, json, renderApp } from './helpers';
 
 const pdfMocks = vi.hoisted(() => ({ getDocument: vi.fn() }));
@@ -32,6 +35,77 @@ describe('local PDF preview and document revisions', () => {
     expect(screen.queryByRole('img')).not.toBeInTheDocument();
     expect(fetch).not.toHaveBeenCalled();
     expect(pdfMocks.getDocument).not.toHaveBeenCalled();
+  });
+
+  describe('latest document operation', () => {
+    const draftWriter: Run = {
+      ...runFixture, id: 'draft-writer', kind: 'documents', status: 'failed', approvals: [],
+      input: { application_id: applicationFixture.id }, stage: 'independent_review_1',
+      message: 'Original draft-writing operation.',
+    };
+
+    function setup(latest: Run, visibleRuns: Run[] = [draftWriter]) {
+      vi.stubGlobal('EventSource', undefined);
+      const state = { latest, visibleRuns };
+      const fetch = fetchFixtures({
+        '/api/v1/workspace': workspaceFixture,
+        '/api/v1/runs': () => json({
+          items: state.visibleRuns, total: state.visibleRuns.length, next_cursor: null,
+        }),
+        '/api/v1/applications/application-1': {
+          ...applicationFixture, last_run_id: draftWriter.id, latest_run_id: latest.id,
+        },
+        '/api/v1/applications/application-1/documents/cv': documentFixture,
+        '/api/v1/profile': profileFixture,
+        '/api/v1/system/readiness': { ai_connected: true, privacy_consent: true },
+        [`/api/v1/runs/${latest.id}`]: () => json(state.latest),
+        [`/api/v1/runs/${draftWriter.id}`]: draftWriter,
+      });
+      const result = renderApp(<Routes>
+        <Route path="/applications/:id" element={<ApplicationDetailPage />} />
+      </Routes>, { route: '/applications/application-1', activity: true });
+      return { ...result, fetch, state };
+    }
+
+    it.each(['failed', 'cancelled', 'interrupted', 'succeeded'] as const)(
+      'shows the newest %s attempt even when Activity does not retain it',
+      async (status) => {
+        const latest: Run = {
+          ...draftWriter, id: 'latest-attempt', status, stage: 'evidence_review_2',
+          message: 'Most recent document attempt.',
+          error: status === 'failed' ? 'Evidence links need repair.' : null,
+        };
+        const { fetch } = setup(latest);
+        expect(await screen.findByText(latest.message)).toBeVisible();
+        const panel = screen.getByRole('heading', { name: 'Latest operation' }).closest('section')!;
+        expect(within(panel).getByRole('link', { name: /Review operation & decisions/ }))
+          .toHaveAttribute('href', '/activity#run-latest-attempt');
+        if (latest.error) expect(within(panel).getByText(latest.error)).toBeVisible();
+        expect(screen.queryByText(draftWriter.message)).not.toBeInTheDocument();
+        expect(fetch.mock.calls.some(([url]) => String(url).includes('/runs/draft-writer'))).toBe(false);
+      },
+    );
+
+    it('keeps the same attempt visible after it stops instead of returning to the draft writer', async () => {
+      const latest: Run = {
+        ...draftWriter, id: 'latest-attempt', status: 'running', stage: 'independent_review_2',
+        message: 'Reviewing the latest attempt.',
+      };
+      const unrelated: Run = { ...latest, id: 'other-kind', kind: 'evaluate', message: 'Unrelated evaluation.' };
+      const { client, fetch, state } = setup(latest, [unrelated, latest, draftWriter]);
+      expect(await screen.findByText(latest.message)).toBeVisible();
+      state.latest = { ...latest, status: 'failed', error: 'The newest review stopped.' };
+      state.visibleRuns = [draftWriter];
+      await act(async () => {
+        await client.refetchQueries({ queryKey: ['runs'] });
+      });
+      expect(await screen.findByText('The newest review stopped.')).toBeVisible();
+      const panel = screen.getByRole('heading', { name: 'Latest operation' }).closest('section')!;
+      expect(within(panel).getByRole('link', { name: 'Open draft & resume checks' })).toBeVisible();
+      expect(within(panel).queryByRole('button', { name: 'Cancel operation' })).not.toBeInTheDocument();
+      expect(screen.queryByText(draftWriter.message)).not.toBeInTheDocument();
+      expect(fetch.mock.calls.some(([url]) => String(url).includes('/runs/draft-writer'))).toBe(false);
+    });
   });
 
   it('renders PDF.js locally and immediately hides rendered pages when edits make them stale', async () => {

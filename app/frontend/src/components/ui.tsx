@@ -80,7 +80,7 @@ export function Empty({ title, children, action }: { title: string; children: Re
 }
 
 const labels: Record<string, string> = {
-  preparing: 'Preparing · not yet drafted', drafted: 'Drafted · not sent', applied: 'Applied', submitted: 'Submitted', interview: 'Interview',
+  preparing: 'Preparing · not yet verified', drafted: 'Drafted · not sent', applied: 'Applied', submitted: 'Submitted', interview: 'Interview',
   offer: 'Offer', hired: 'Hired', rejected: 'Rejected', no_response: 'No response',
   offer_declined: 'Offer declined', withdrawn: 'Withdrawn', awaiting_user: 'Your decision needed',
   queued: 'Queued', running: 'In progress', succeeded: 'Completed', failed: 'Failed',
@@ -88,6 +88,7 @@ const labels: Record<string, string> = {
   setup_required: 'Setup required', unavailable: 'Unavailable', ready: 'Ready', optional: 'Optional',
   pass: 'Passed', fail: 'Failed', skipped: 'Not checked', pending: 'Needs checking',
   approved: 'Approved', denied: 'Not approved', rejected_approval: 'Rejected',
+  needs_review: 'Needs review', unverified: 'Unverified draft', verified: 'Verified draft',
 };
 
 export function humanize(value: string) {
@@ -96,9 +97,9 @@ export function humanize(value: string) {
 
 export function Badge({ value, children }: { value: string; children?: ReactNode }) {
   let tone = 'neutral';
-  if (['ready', 'pass', 'PASS', 'succeeded', 'approved', 'hired', 'offer'].includes(value)) tone = 'positive';
+  if (['ready', 'pass', 'PASS', 'succeeded', 'approved', 'hired', 'offer', 'verified'].includes(value)) tone = 'positive';
   if (['failed', 'fail', 'FAIL', 'rejected', 'unavailable'].includes(value)) tone = 'negative';
-  if (['awaiting_user', 'pending', 'FLAG', 'setup_required', 'interrupted', 'drafted'].includes(value)) tone = 'amber';
+  if (['awaiting_user', 'pending', 'FLAG', 'setup_required', 'interrupted', 'drafted', 'needs_review', 'unverified'].includes(value)) tone = 'amber';
   if (['preparing', 'running', 'queued', 'applied', 'interview'].includes(value)) tone = 'blue';
   return <span className={`badge badge-${tone}`}>{children ?? humanize(value)}</span>;
 }

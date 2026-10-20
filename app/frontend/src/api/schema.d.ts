@@ -745,6 +745,27 @@ export interface components {
             } | null;
             /** Last Run Id */
             last_run_id?: string | null;
+            /** Latest Run Id */
+            latest_run_id?: string | null;
+            /**
+             * Preparation Cost Usd
+             * @default 0
+             */
+            preparation_cost_usd: number;
+            /**
+             * Preparation Attempts
+             * @default 0
+             */
+            preparation_attempts: number;
+            /**
+             * Review Checkpoint Available
+             * @default false
+             */
+            review_checkpoint_available: boolean;
+            /** Next Run Limit Usd */
+            next_run_limit_usd?: number | null;
+            /** Content Issues */
+            content_issues?: components["schemas"]["DocumentIssue"][];
         } & {
             [key: string]: unknown;
         };
@@ -819,7 +840,10 @@ export interface components {
             id?: string;
             /** Text */
             text: string;
-            /** Evidence Ids */
+            /**
+             * Evidence Ids
+             * @description Supporting IDs from the supplied evidence snapshot. Required for every achievement; preserve valid references during revision.
+             */
             evidence_ids?: string[];
         };
         /** Decision */
@@ -874,7 +898,10 @@ export interface components {
              * @default
              */
             end: string;
-            /** Evidence Ids */
+            /**
+             * Evidence Ids
+             * @description Supporting IDs from the supplied evidence snapshot. Required for entry and bullet blocks. Preserve references when revising supported claims; never invent IDs.
+             */
             evidence_ids?: string[];
             /** Bullets */
             bullets?: components["schemas"]["Claim"][];
@@ -905,6 +932,46 @@ export interface components {
             /** Expected Revision */
             expected_revision: string;
         };
+        /** DocumentIssue */
+        DocumentIssue: {
+            /**
+             * Kind
+             * @default grounding
+             * @enum {string}
+             */
+            kind: "grounding" | "company" | "evidence" | "layout";
+            /** Document */
+            document?: ("cv" | "cover_letter") | null;
+            /**
+             * Block Id
+             * @default
+             */
+            block_id: string;
+            /**
+             * Claim Id
+             * @default
+             */
+            claim_id: string;
+            /**
+             * Quote
+             * @default
+             */
+            quote: string;
+            /** Message */
+            message: string;
+            /** Evidence Ids */
+            evidence_ids?: string[];
+            /**
+             * Suggestion
+             * @default
+             */
+            suggestion: string;
+            /**
+             * Needs Confirmation
+             * @default false
+             */
+            needs_confirmation: boolean;
+        };
         /** DocumentRunInput */
         DocumentRunInput: {
             /** Expected Revision */
@@ -914,6 +981,8 @@ export interface components {
              * @default
              */
             instruction: string;
+            /** Resume From */
+            resume_from?: string | null;
         };
         /** DocumentView */
         DocumentView: {

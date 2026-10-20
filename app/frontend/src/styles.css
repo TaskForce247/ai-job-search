@@ -345,7 +345,12 @@ tr:last-child td { border-bottom: 0; }
 .checks-list .badge { flex-shrink: 0; font-size: .65rem; }
 .checks-list strong { font-size: .76rem; }
 .checks-list .hint { font-size: .72rem; margin: 5px 0 0; }
-.mobile-pane-switch { display: none; gap: 8px; }
+.mobile-pane-switch { display: flex; gap: 8px; flex-wrap: wrap; }
+.document-split[hidden] { display: none; }
+.preparation-checklist { list-style: none; padding: 0; display: flex; flex-wrap: wrap; gap: 12px 24px; }
+.preparation-checklist li { display: flex; gap: 8px; align-items: center; }
+.document-issue { padding: 16px; border: 1px solid var(--border); border-left: 3px solid var(--border-strong); border-radius: 8px; }
+.document-issue blockquote { white-space: pre-wrap; }
 .rewrite-panel { margin-top: 22px; padding: 14px 0 0; border-top: 1px solid var(--border); font-size: .85rem; }
 .review-findings { list-style: none; padding: 0; }
 .review-findings li { padding: 12px 0; border-bottom: 1px solid var(--border); font-size: .87rem; }

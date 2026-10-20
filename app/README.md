@@ -116,11 +116,40 @@ preserves saved checkpoints; an interrupted AI request may still incur charges.
 - To resume, start the two services again and open the new terminal-issued link.
   Your saved workspace is not deleted by stopping either service.
 
-For failed document preparation, **Retry operation** reuses saved drafts and
+## Drafts, review and recovery
+
+For stopped document preparation, **Resume checks** reuses saved drafts and
 binds the new operation to the application's current saved version. It does not
 reuse the version from before the drafts were saved. Later edits still stop
 preparation rather than being overwritten. Retries may incur additional API
 charges, and all required review and verification must still pass.
+
+Evidence links are checked locally before each independent review. Missing or
+invalid links enter the existing three-cycle repair limit, within your configured
+AI limits. Evidence repairs are saved as unverified before review, and rejected
+reviews are not replayed as successful retry checkpoints.
+
+The application workspace opens readable **CV** and **Cover letter** drafts
+before a PDF exists. **Checks** shows outstanding issues, supporting source text,
+proposed corrections, and actual PDF check results. Content findings pause as
+**Needs review** rather than a technical failure. Conservative wording
+corrections are independently rechecked and shown as a before/after proposal;
+only **Accept corrections & continue** replaces the saved draft. Missing facts
+are never added to Profile automatically. You can instead edit and save the
+draft yourself, then choose **Resume checks**.
+
+Resume binds to the current saved version and reuses a completed factual review
+only when its documents, profile, posting, assessment, policy and verification
+date still match. A changed input requires the relevant checks again. Company
+claims are independently verified before the final factual gate; assessment
+wording warnings remain separate from the actual documents. Compilation and
+rendered-page inspection must still pass before PDFs are considered verified.
+
+The workspace shows the recorded API cost across document attempts and the
+configured limit for the next operation. Acceptance and continuation can still
+use the AI connection; interrupted requests may have unrecorded provider charges.
+**Latest operation** includes stopped attempts, and Activity links to both drafts
+even if the operation failed. None of these actions submits an application.
 
 ## Alternative: one server with a built frontend
 

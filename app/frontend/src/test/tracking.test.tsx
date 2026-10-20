@@ -15,9 +15,9 @@ describe('preparation and imported-record semantics', () => {
       ], total: 3, next_cursor: null,
     } });
     renderApp(<ApplicationsPage />);
-    const column = await screen.findByRole('region', { name: 'Preparing · not yet drafted applications' });
+    const column = await screen.findByRole('region', { name: 'Preparing · not yet verified applications' });
     expect(within(column).getByRole('link', { name: 'Preparing role' })).toBeVisible();
-    expect(within(column).getByText('Document preparation in progress · not sent')).toBeVisible();
+    expect(within(column).getByText('Draft workspace · not yet verified')).toBeVisible();
     expect(screen.getByRole('link', { name: 'Closed legacy role' })).toBeVisible();
     expect(screen.getByRole('link', { name: 'Unmapped imported role' })).toBeVisible();
     expect(screen.queryByText('Drafted · not sent', { selector: '.application-card p' })).not.toBeInTheDocument();

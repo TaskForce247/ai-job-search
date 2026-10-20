@@ -1,7 +1,8 @@
 import { Fragment, useState } from 'react';
+import { Link } from 'react-router-dom';
 import type { DocumentContent, DocumentKind } from '../types';
 import { ReadDocument } from './PdfPreview';
-import { Alert, Badge, ExternalLink, formatDate, humanize } from './ui';
+import { Alert, Badge, Button, ExternalLink, formatDate, humanize } from './ui';
 
 export function asObject(value: unknown): Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -113,10 +114,45 @@ export function EvaluationView({ value }: { value: Record<string, unknown> }) {
   </div>;
 }
 
-function RewriteComparison({ before, after }: { before: Record<string, unknown>; after: Record<string, unknown> }) {
+export function DocumentIssues({ issues, evidence, onEditIssue, disabled = false }: {
+  issues: unknown; evidence?: unknown;
+  onEditIssue?: (kind?: DocumentKind, blockId?: string) => void;
+  disabled?: boolean;
+}) {
+  if (!Array.isArray(issues) || !issues.length) return null;
+  const sources = Array.isArray(evidence) ? evidence.map(asObject) : [];
+  return <section className="stack" aria-label="Document issues">{issues.map((value, index) => {
+    const issue = asObject(value);
+    const kind = issue.document === 'cv' || issue.document === 'cover_letter' ? issue.document : undefined;
+    const ids = Array.isArray(issue.evidence_ids) ? issue.evidence_ids.filter((id): id is string => typeof id === 'string') : [];
+    const supporting = sources.filter((source) => typeof source.id === 'string' && ids.includes(source.id));
+    return <section className="document-issue" key={index}>
+      <div className="actions"><Badge value="needs_review" />
+        {kind && <strong>{kind === 'cv' ? 'CV' : 'Cover letter'}</strong>}</div>
+      {typeof issue.quote === 'string' && issue.quote && <><h4>Wording to review</h4><blockquote>{issue.quote}</blockquote></>}
+      <p>{typeof value === 'string' ? value : typeof issue.message === 'string' ? issue.message :
+        'These review details are incomplete. Inspect the operation details before continuing.'}</p>
+      {supporting.length > 0 && <div><h4>Supporting source</h4>{supporting.map((source) => <div key={String(source.id)}>
+        <blockquote>{typeof source.text === 'string' ? source.text : 'Source text is unavailable.'}</blockquote>
+        <p className="hint">{String(source.section ?? '')} · {String(source.source ?? '')}</p>
+      </div>)}</div>}
+      {ids.length > 0 && !supporting.length && <p className="field-error">The linked source is not available in this review. Do not treat the suggestion as a confirmed fact.</p>}
+      {typeof issue.suggestion === 'string' && issue.suggestion && <div><h4>Suggested correction</h4><p>{issue.suggestion}</p></div>}
+      {issue.needs_confirmation === true && <p className="hint">A genuine fact needs your confirmation. The app has not added it to your Profile.
+        {' '}<Link to="/profile">Review and confirm Profile facts</Link>, then reassess the role, or remove the uncertain claim from the draft.</p>}
+      {onEditIssue && <Button variant="secondary" disabled={disabled} onClick={() =>
+        onEditIssue(kind, typeof issue.block_id === 'string' ? issue.block_id : undefined)}>
+        {kind && issue.block_id ? 'Edit this sentence' : 'Edit draft manually'}</Button>}
+    </section>;
+  })}</section>;
+}
+
+function RewriteComparison({ before, after, correction = false }: {
+  before: Record<string, unknown>; after: Record<string, unknown>; correction?: boolean;
+}) {
   const [kind, setKind] = useState<DocumentKind>('cv');
   return <div className="stack">
-    <Alert title="Proposed rewrite · not yet accepted">
+    <Alert title={correction ? 'Checked correction · awaiting your acceptance' : 'Proposed rewrite · not yet accepted'}>
       Compare the proposed text with your saved drafts. Approving accepts the changes for compilation and checking;
       rejecting preserves the current content. No documents are sent.
     </Alert>
@@ -131,9 +167,32 @@ function RewriteComparison({ before, after }: { before: Record<string, unknown>;
   </div>;
 }
 
-export function ProposalView({ proposal, kind }: { proposal: Record<string, unknown>; kind: string }) {
+export function ProposalView({ proposal, kind, onEditIssue }: {
+  proposal: Record<string, unknown>; kind: string;
+  onEditIssue?: (kind?: DocumentKind, blockId?: string) => void;
+}) {
   const before = asObject(proposal.before);
   const after = asObject(proposal.after);
+  const documentPair = ['cv', 'cover_letter'].every((name) =>
+    Array.isArray(asObject(before[name]).blocks) && Array.isArray(asObject(after[name]).blocks));
+  if (kind.includes('document_correction') && documentPair) {
+    return <div className="stack">
+      <DocumentIssues issues={proposal.issues} evidence={proposal.evidence} onEditIssue={onEditIssue} />
+      <RewriteComparison before={before} after={after} correction />
+      <p className="hint">Accepting applies this revision and continues remaining checks. It does not change Profile facts or submit an application. Remaining AI-backed checks may incur charges.</p>
+    </div>;
+  }
+  if (kind.includes('document_review')) {
+    return <div className="stack">
+      <Alert tone="warning" title="Draft saved · needs your review">
+        Automatic correction reached its limit or needs a genuine fact clarified. Read the issues, edit and save your draft,
+        then resume checks. Unsupported claims remain unverified.
+      </Alert>
+      <DocumentIssues issues={proposal.issues} evidence={proposal.evidence} onEditIssue={onEditIssue} />
+      {documentPair && <details><summary>Compare the saved draft with the latest unverified AI revision</summary>
+        <RewriteComparison before={before} after={after} /></details>}
+    </div>;
+  }
   if (kind.includes('document_rewrite') && ['cv', 'cover_letter'].every((name) =>
     Array.isArray(asObject(before[name]).blocks) && Array.isArray(asObject(after[name]).blocks))) {
     return <RewriteComparison before={before} after={after} />;

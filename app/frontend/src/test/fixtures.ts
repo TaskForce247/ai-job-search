@@ -41,6 +41,7 @@ export const applicationFixture: Application = {
   source: 'https://example.test/careers/developer', deadline: null, applied_on: null, fit_rating: 82,
   revision: 'application-r1', archive_dir: 'documents/applications/example_application-1',
   documents: { cv: documentFixture }, timeline: [], published: true, legacy: false,
+  preparation_cost_usd: 0, preparation_attempts: 0, review_checkpoint_available: false, content_issues: [],
 };
 
 export const approvalFixture: Approval = {

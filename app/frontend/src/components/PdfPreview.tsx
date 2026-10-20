@@ -104,11 +104,11 @@ export function PdfPreview({ artifactId, stale, content }: {
   const current = !stale && loaded && loaded.id === artifactId ? loaded.pdf : undefined;
   return <div className="pdf-preview" ref={container}>
     {stale ? <Alert tone="warning" title="PDF is out of date">
-      Content has changed since the last compile. Save your edits, then compile and check the documents.
+      Content has changed since the last compile. Save your edits, then choose “Resume checks.”
       The previous PDF is not a preview of your current edits.
       {artifactId && <p><a href={artifactUrl(artifactId)} download>Download previous PDF (out of date)</a></p>}
     </Alert> : !artifactId ? <Alert title="No compiled PDF yet">
-      Save the document, then choose “Compile & check documents.” You can read and edit the text while you wait.
+      Save the document, then choose “Resume checks.” You can read and edit the text while you wait.
     </Alert> : error ? <Alert tone="warning" title="PDF preview unavailable">
       <p>{error}</p><p>Your document text is available below. <a href={artifactUrl(artifactId)} download>Download the PDF</a> to inspect it locally.</p>
     </Alert> : current ? <>

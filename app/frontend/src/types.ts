@@ -126,6 +126,7 @@ export type DocumentView = Omit<KnownFields<ApiSchema<'DocumentView'>>, 'content
 };
 
 export type DocumentKind = 'cv' | 'cover_letter';
+export type DocumentIssue = ApiSchema<'DocumentIssue'>;
 
 export type Application = Omit<KnownFields<ApiSchema<'ApplicationView'>>, 'documents' | 'evaluation' | 'review' | 'timeline'> & {
   documents: Partial<Record<DocumentKind, DocumentView>>;
@@ -133,6 +134,8 @@ export type Application = Omit<KnownFields<ApiSchema<'ApplicationView'>>, 'docum
   review?: {
     findings: { kind: string; message: string; block_id?: string }[];
     sources: { url: string; claim: string; quote: string }[];
+    factual_notes?: string[];
+    assessment_warnings?: string[];
   } | null;
   timeline: { date: string; status: string; stage: string; notes: string }[];
 };

@@ -30,6 +30,10 @@ function EvidenceLinks({ ids, evidence, onChange }: {
   </details>;
 }
 
+export function isVerifiedDocument(view: DocumentView) {
+  return !view.stale && view.checks.length > 0 && view.checks.every((check) => check.status === 'pass');
+}
+
 export function DocumentChecks({ view, stale }: { view: DocumentView; stale: boolean }) {
   return <section aria-label="Document verification" className="document-checks">
     <h3>Verification & keyword coverage</h3>
@@ -48,16 +52,19 @@ export function DocumentChecks({ view, stale }: { view: DocumentView; stale: boo
   </section>;
 }
 
-export function DocumentEditor({ applicationId, kind, view, evidence, onDirtyChange }: {
+export function DocumentEditor({ applicationId, kind, view, evidence, onDirtyChange, initialPane = 'content', focusBlockId, editRequest }: {
   applicationId: string; kind: DocumentKind; view: DocumentView; evidence: Evidence[];
   onDirtyChange: (dirty: boolean) => void;
+  initialPane?: 'content' | 'read';
+  focusBlockId?: string;
+  editRequest?: number;
 }) {
   const [content, setContent] = useState(() => clone(view.content));
   const [savedContent, setSavedContent] = useState(() => clone(view.content));
   const [revision, setRevision] = useState(view.revision);
   const [history, setHistory] = useState<DocumentContent[]>([]);
   const [discard, setDiscard] = useState(false);
-  const [pane, setPane] = useState<'content' | 'preview'>('content');
+  const [pane, setPane] = useState<'read' | 'content' | 'preview'>(initialPane);
   const [comparison, setComparison] = useState<{ before: DocumentContent; after: DocumentContent }>();
   const dirty = JSON.stringify(content) !== JSON.stringify(savedContent);
   const client = useQueryClient();
@@ -81,6 +88,14 @@ export function DocumentEditor({ applicationId, kind, view, evidence, onDirtyCha
       setRevision(view.revision); setHistory([]);
     }
   }, [view, revision, dirty, savedContent]);
+  useEffect(() => {
+    if (editRequest) setPane('content');
+  }, [editRequest]);
+  useEffect(() => {
+    if (!focusBlockId || pane !== 'content') return;
+    document.getElementById(`block-title-${focusBlockId}`)?.scrollIntoView?.({ block: 'center' });
+    document.getElementById(`block-text-${focusBlockId}`)?.focus();
+  }, [focusBlockId, pane, editRequest]);
 
   function update(change: (draft: DocumentContent) => void) {
     setHistory((previous) => [...previous.slice(-49), clone(content)]);
@@ -116,10 +131,16 @@ export function DocumentEditor({ applicationId, kind, view, evidence, onDirtyCha
       <details><summary>Newer saved content</summary><ReadDocument content={view.content} /></details>
     </Alert>}
     <div className="mobile-pane-switch" role="group" aria-label="Document workspace view">
+      <Button variant={pane === 'read' ? 'primary' : 'secondary'} aria-pressed={pane === 'read'} onClick={() => setPane('read')}>Read draft</Button>
       <Button variant={pane === 'content' ? 'primary' : 'secondary'} aria-pressed={pane === 'content'} onClick={() => setPane('content')}>Edit content</Button>
       <Button variant={pane === 'preview' ? 'primary' : 'secondary'} aria-pressed={pane === 'preview'} onClick={() => setPane('preview')}>PDF preview</Button>
     </div>
-    <div className={`document-split show-${pane}`}>
+    {pane === 'read' && <section aria-label="Readable saved draft" className="stack">
+      <div className="actions"><Badge value={!stale && isVerifiedDocument(view) ? 'verified' : 'unverified'} />
+        <span className="hint">Readable text is available before PDF compilation. A draft is never a submission.</span></div>
+      <ReadDocument content={content} />
+    </section>}
+    <div className={`document-split show-${pane}`} hidden={pane === 'read'}>
       <section className="document-content-panel" aria-label="Editable document content">
         <fieldset className="editor-fieldset" disabled={save.isPending}>
           <legend className="sr-only">Document content blocks</legend>
@@ -166,11 +187,11 @@ export function DocumentEditor({ applicationId, kind, view, evidence, onDirtyCha
           }))}>+ Add content block</Button>
         </fieldset>
       </section>
-      <section className="document-preview-panel" aria-label="Compiled PDF preview">
+      {pane !== 'read' && <section className="document-preview-panel" aria-label="Compiled PDF preview">
         <h3>PDF preview</h3><PdfPreview artifactId={view.pdf_artifact_id} stale={stale} content={content} />
         {view.source_artifact_id && <p><a href={artifactUrl(view.source_artifact_id)} download>Download generated source</a> <span className="hint">(advanced)</span></p>}
         <DocumentChecks view={view} stale={stale} />
-      </section>
+      </section>}
     </div>
     {(dirty || comparison) && <details><summary>{dirty ? 'Compare current edits with saved content' : 'Compare the previous and current document'}</summary>
       <div className="comparison"><section><h3>Before</h3><ReadDocument content={dirty ? savedContent : comparison!.before} /></section>

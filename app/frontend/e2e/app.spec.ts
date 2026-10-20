@@ -115,7 +115,7 @@ async function installApi(page: Page, onboardingComplete = true) {
     if (path === '/approvals/evaluate-approval/decision') {
       expect(body).toEqual({ decision: 'prepare', expected_revision: 'evaluation-revision', confirmation: '' });
       runs = runs.map((run) => ({ ...run, status: 'succeeded', approvals: [] }));
-      runs = [{ ...runFixture, id: 'preparation-run', kind: 'document_preparation', stage: 'published', status: 'succeeded',
+      runs = [{ ...runFixture, id: 'preparation-run', kind: 'documents', stage: 'published', status: 'succeeded',
         approvals: [], input: { application_id: application.id }, message: 'Drafts prepared and checked; not sent.' }, ...runs];
       application.last_run_id = 'preparation-run';
       return respond(route, { run_id: 'evaluation-run', preparation_run_id: 'preparation-run', application_id: application.id }, 202);
@@ -124,7 +124,8 @@ async function installApi(page: Page, onboardingComplete = true) {
       expect(body.expected_revision).toBe(application.revision);
       document = { ...document, stale: false, pdf_artifact_id: 'pdf-recompiled' };
       application = { ...application, last_run_id: 'compile-run', documents: { ...application.documents, cv: document } };
-      runs = [{ ...runFixture, id: 'compile-run', status: 'succeeded', stage: 'verified', message: 'Compilation and checks complete.', approvals: [] }, ...runs];
+      runs = [{ ...runFixture, id: 'compile-run', kind: 'documents', input: { application_id: application.id },
+        status: 'succeeded', stage: 'verified', message: 'Compilation and checks complete.', approvals: [] }, ...runs];
       return respond(route, { run_id: 'compile-run' }, 202);
     }
     if (path === '/applications/application-1/submissions') {
@@ -173,15 +174,23 @@ test('search, evaluate, approve, edit, locally preview and record a real submiss
   await expect(page.getByRole('heading', { name: 'Prepare for Example Co?' })).toBeVisible();
   await page.getByRole('button', { name: 'Prepare application documents' }).click();
   await expect(page.getByRole('heading', { name: 'Software developer', exact: true })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Readable saved draft' })).toBeVisible();
+  await expect(page.locator('.document-content-panel')).toBeHidden();
+  await expect(page.getByRole('img', { name: /PDF page/ })).toHaveCount(0);
+  await page.locator('.application-documents').screenshot({ path: testInfo.outputPath('readable-drafts.png') });
+  await page.getByRole('button', { name: 'PDF preview', exact: true }).click();
   await expect(page.getByRole('img', { name: /PDF page/ })).toHaveCount(2);
   await expect.poll(async () => page.locator('canvas').first().evaluate((canvas: HTMLCanvasElement) => canvas.width)).toBeGreaterThan(100);
+  await page.getByRole('button', { name: 'Edit content', exact: true }).click();
   await page.getByLabel('Body text', { exact: true }).first().fill('Updated paragraph grounded in confirmed experience.');
   await expect(page.getByText('PDF is out of date')).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Compile & check documents' })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Resume checks' })).toBeDisabled();
   await page.getByRole('button', { name: 'Save document edits' }).click();
   await expect(page.getByText('Document edits saved.', { exact: false })).toBeVisible();
   await expect(page.getByText('PDF is out of date')).toBeVisible();
-  await page.getByRole('button', { name: 'Compile & check documents' }).click();
+  await page.getByRole('button', { name: 'Resume checks' }).click();
+  await expect(page.getByRole('region', { name: 'Application checks and corrections' })).toBeVisible();
+  await page.getByRole('button', { name: 'CV', exact: true }).click();
   await expect(page.getByRole('img', { name: /PDF page/ })).toHaveCount(2);
   await expect(page.getByText('PDF is out of date')).toHaveCount(0);
   const dismiss = page.getByRole('button', { name: 'Dismiss notification' });

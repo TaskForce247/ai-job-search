@@ -2,11 +2,13 @@ import { useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { api, artifactUrl, queryString } from '../api';
 import { isActiveRun, useAction, useActivity, useApiQuery, useNotices } from '../query';
-import type { ApiSchema, Approval, Page, Run, RunAccepted } from '../types';
+import type { ApiSchema, Approval, DocumentKind, Page, Run, RunAccepted } from '../types';
 import { hasBlockingGate, ProposalView, StructuredDetails } from '../components/proposals';
 import { Alert, Badge, Button, Empty, ErrorPanel, Field, formatDate, humanize, Loading, Modal, PageHeader, Pager, Panel } from '../components/ui';
 
 function choiceLabel(choice: string, kind: string) {
+  if (kind.includes('document_correction')) return choice === 'approve' ? 'Accept corrections & continue' : 'Keep saved draft';
+  if (kind.includes('document_review') && choice === 'reject') return 'Keep saved draft';
   if (choice === 'prepare') return 'Prepare application documents';
   if (choice === 'not_now') return 'Not now';
   if (choice === 'reject') return 'Reject proposal';
@@ -19,7 +21,10 @@ function choiceLabel(choice: string, kind: string) {
   return humanize(choice);
 }
 
-export function ApprovalCard({ approval, runKind = '' }: { approval: Approval; runKind?: string }) {
+export function ApprovalCard({ approval, runKind = '', disabled = false, onEditIssue }: {
+  approval: Approval; runKind?: string; disabled?: boolean;
+  onEditIssue?: (kind?: DocumentKind, blockId?: string) => void;
+}) {
   const [confirmation, setConfirmation] = useState('');
   const navigate = useNavigate();
   const { queued } = useNotices();
@@ -32,8 +37,10 @@ export function ApprovalCard({ approval, runKind = '' }: { approval: Approval; r
       confirmation: ['reject', 'not_now', 'cancel'].includes(decision) ? '' : confirmation,
     } satisfies ApiSchema<'Decision'>,
   }), (result, decision) => {
-    queued({ ...result, run_id: result.preparation_run_id || result.run_id }, decision === 'prepare'
-      ? 'Document preparation queued. It is not yet drafted or sent; follow the checks before using its files.' :
+    queued({ ...result, run_id: result.preparation_run_id || result.run_id }, approval.kind === 'document_correction' && decision === 'approve'
+      ? 'Corrections accepted. Remaining checks queued; unchanged verified review checkpoints can be reused. No Profile facts were changed.'
+      : decision === 'prepare'
+      ? 'Document preparation queued. Read saved drafts in the application workspace; wait for verification before using PDFs. Nothing is sent.' :
       ['reject', 'not_now'].includes(decision) ? 'Decision recorded. The proposal was not applied.' :
         'Decision recorded. Follow Activity to confirm the operation completes successfully.');
     setConfirmation('');
@@ -43,7 +50,7 @@ export function ApprovalCard({ approval, runKind = '' }: { approval: Approval; r
   return <section className="approval-card" aria-labelledby={`approval-${approval.id}`}>
     <div className="section-heading"><h3 id={`approval-${approval.id}`}>{approval.title}</h3><Badge value={approval.status}>
       {approval.status === 'pending' ? 'Your decision needed' : humanize(approval.status)}</Badge></div>
-    <ProposalView proposal={approval.proposal} kind={approval.kind} />
+    <ProposalView proposal={approval.proposal} kind={approval.kind} onEditIssue={onEditIssue} />
     {approval.status === 'pending' ? <div className="stack approval-actions">
       {requiredConfirmation && <Field id={`confirmation-${approval.id}`} label={`Type ${requiredConfirmation} to approve`}
         hint="This changes local files. Review the proposed changes and make a backup first.">
@@ -56,7 +63,7 @@ export function ApprovalCard({ approval, runKind = '' }: { approval: Approval; r
         return <Button key={choice} type="button"
           variant={negative ? 'secondary' : requiredConfirmation ? 'danger' : 'primary'}
           busy={action.isPending}
-          disabled={!negative && !!requiredConfirmation && confirmation !== requiredConfirmation}
+          disabled={!negative && (disabled || (!!requiredConfirmation && confirmation !== requiredConfirmation))}
           onClick={() => action.mutate(choice)}>{choiceLabel(choice, kind)}</Button>;
       })}</div>
       {blocked && <p className="field-error">Document preparation is unavailable because a required gate failed.
@@ -74,12 +81,15 @@ export function RunActions({ run }: { run: Run }) {
     () => { setConfirmCancel(false); notify('Cancellation requested. Activity will show when the operation has stopped.'); });
   const retry = useAction(() => api<RunAccepted>(`/runs/${encodeURIComponent(run.id)}/retry`, { method: 'POST', body: {} }),
     (result) => queued(result, 'Retry queued using the server’s recovery checks. Review the new operation’s result in Activity.'));
+  const applicationId = typeof run.input.application_id === 'string' ? run.input.application_id :
+    typeof run.result?.application_id === 'string' ? run.result.application_id : undefined;
   return <div className="stack">
     <div className="actions">
       {isActiveRun(run) && <Button variant="secondary" disabled={retry.isPending}
         onClick={() => setConfirmCancel(true)}>Cancel operation</Button>}
-      {['failed', 'interrupted', 'cancelled'].includes(run.status) &&
-        <Button variant="secondary" busy={retry.isPending} onClick={() => retry.mutate()}>Retry operation</Button>}
+      {['failed', 'interrupted', 'cancelled'].includes(run.status) && (run.kind === 'documents' && applicationId ?
+        <Link className="button button-secondary" to={`/applications/${encodeURIComponent(applicationId)}?tab=checks#checks`}>Open draft & resume checks</Link> :
+        <Button variant="secondary" busy={retry.isPending} onClick={() => retry.mutate()}>Retry operation</Button>)}
     </div>
     <ErrorPanel error={retry.error} />
     <Modal open={confirmCancel} title="Cancel this operation?" onClose={() => { if (!cancel.isPending) setConfirmCancel(false); }}>
@@ -94,7 +104,8 @@ export function RunActions({ run }: { run: Run }) {
 function RunCard({ run }: { run: Run }) {
   const pending = run.approvals.filter((approval) => approval.status === 'pending');
   const otherApprovals = run.approvals.filter((approval) => approval.status !== 'pending');
-  const applicationId = typeof run.result?.application_id === 'string' ? run.result.application_id : undefined;
+  const applicationId = typeof run.result?.application_id === 'string' ? run.result.application_id :
+    typeof run.input.application_id === 'string' ? run.input.application_id : undefined;
   return <Panel className={`run-card run-${run.status}`}>
     <div id={`run-${run.id}`} className="anchor-target" />
     <div className="section-heading"><div><p className="eyebrow">{humanize(run.kind)}</p>
@@ -110,6 +121,10 @@ function RunCard({ run }: { run: Run }) {
       This operation is waiting for input but has no current decision available. Refresh Activity or retry after resolving changed inputs.</Alert>}
     {pending.map((approval) => <ApprovalCard key={approval.id} approval={approval} runKind={run.kind} />)}
     {applicationId && <p><Link to={`/applications/${encodeURIComponent(applicationId)}`}>Open the application workspace →</Link></p>}
+    {applicationId && run.kind === 'documents' && <div className="actions">
+      <Link to={`/applications/${encodeURIComponent(applicationId)}?document=cv`}>Open CV draft</Link>
+      <Link to={`/applications/${encodeURIComponent(applicationId)}?document=cover_letter`}>Open cover letter draft</Link>
+    </div>}
     {run.artifacts.length > 0 && <div className="artifact-list"><h3>Saved artifacts</h3>
       {run.artifacts.map((artifact) => <a key={artifact.id} href={artifactUrl(artifact.id)} download>
         Download {artifact.label || artifact.name || humanize(artifact.kind || 'file')}</a>)}</div>}

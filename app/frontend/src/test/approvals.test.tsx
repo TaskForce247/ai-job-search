@@ -7,6 +7,21 @@ import { fetchFixtures, renderApp } from './helpers';
 import { approvalFixture, documentFixture, runFixture, workspaceFixture } from './fixtures';
 
 describe('explicit approvals and durable progress', () => {
+  it('links failed document operations to both saved drafts even when the result only contains findings', async () => {
+    const failed = {
+      ...runFixture, kind: 'documents', status: 'failed', error: 'The generated wording needs review.',
+      input: { application_id: 'application-saved' }, result: { findings: ['An AI-added overstatement.'] }, approvals: [],
+    };
+    fetchFixtures({ '/api/v1/workspace': workspaceFixture, '/api/v1/runs': { items: [failed], total: 1, next_cursor: null } });
+    renderApp(<ActivityPage />, { activity: true });
+    expect(await screen.findByRole('link', { name: 'Open CV draft' }))
+      .toHaveAttribute('href', '/applications/application-saved?document=cv');
+    expect(screen.getByRole('link', { name: 'Open cover letter draft' }))
+      .toHaveAttribute('href', '/applications/application-saved?document=cover_letter');
+    expect(screen.getByRole('link', { name: 'Open draft & resume checks' })).toBeVisible();
+    expect(screen.queryByRole('button', { name: 'Retry operation' })).not.toBeInTheDocument();
+  });
+
   it('shows a useful before/after and submits the specific approval revision', async () => {
     const user = userEvent.setup();
     const fetch = fetchFixtures({ '/api/v1/approvals/approval-1/decision': { run_id: 'run-1' } });
@@ -54,7 +69,7 @@ describe('explicit approvals and durable progress', () => {
     }} />} /><Route path="/applications/:id" element={<h1>Application workspace opened</h1>} /></Routes>);
     await user.click(screen.getByRole('button', { name: 'Prepare application documents' }));
     expect(await screen.findByRole('heading', { name: 'Application workspace opened' })).toBeVisible();
-    expect(screen.getByText(/It is not yet drafted or sent/)).toBeVisible();
+    expect(screen.getByText(/Document preparation queued/)).toHaveTextContent('wait for verification before using PDFs. Nothing is sent.');
   });
 
   it('respects the server blocked flag even when no detailed failing gate is present', () => {
