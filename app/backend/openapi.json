@@ -1905,6 +1905,50 @@
               }
             ],
             "title": "Last Run Id"
+          },
+          "latest_run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latest Run Id"
+          },
+          "preparation_cost_usd": {
+            "type": "number",
+            "title": "Preparation Cost Usd",
+            "default": 0
+          },
+          "preparation_attempts": {
+            "type": "integer",
+            "title": "Preparation Attempts",
+            "default": 0
+          },
+          "review_checkpoint_available": {
+            "type": "boolean",
+            "title": "Review Checkpoint Available",
+            "default": false
+          },
+          "next_run_limit_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Run Limit Usd"
+          },
+          "content_issues": {
+            "items": {
+              "$ref": "#/components/schemas/DocumentIssue"
+            },
+            "type": "array",
+            "title": "Content Issues"
           }
         },
         "additionalProperties": true,
@@ -2092,7 +2136,8 @@
             },
             "type": "array",
             "maxItems": 30,
-            "title": "Evidence Ids"
+            "title": "Evidence Ids",
+            "description": "Supporting IDs from the supplied evidence snapshot. Required for every achievement; preserve valid references during revision."
           }
         },
         "additionalProperties": false,
@@ -2189,7 +2234,8 @@
             },
             "type": "array",
             "maxItems": 30,
-            "title": "Evidence Ids"
+            "title": "Evidence Ids",
+            "description": "Supporting IDs from the supplied evidence snapshot. Required for entry and bullet blocks. Preserve references when revising supported claims; never invent IDs."
           },
           "bullets": {
             "items": {
@@ -2266,6 +2312,82 @@
         ],
         "title": "DocumentEdit"
       },
+      "DocumentIssue": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "grounding",
+              "company",
+              "evidence",
+              "layout"
+            ],
+            "title": "Kind",
+            "default": "grounding"
+          },
+          "document": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "cv",
+                  "cover_letter"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Document"
+          },
+          "block_id": {
+            "type": "string",
+            "title": "Block Id",
+            "default": ""
+          },
+          "claim_id": {
+            "type": "string",
+            "title": "Claim Id",
+            "default": ""
+          },
+          "quote": {
+            "type": "string",
+            "maxLength": 20000,
+            "title": "Quote",
+            "default": ""
+          },
+          "message": {
+            "type": "string",
+            "maxLength": 20000,
+            "title": "Message"
+          },
+          "evidence_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 30,
+            "title": "Evidence Ids"
+          },
+          "suggestion": {
+            "type": "string",
+            "maxLength": 20000,
+            "title": "Suggestion",
+            "default": ""
+          },
+          "needs_confirmation": {
+            "type": "boolean",
+            "title": "Needs Confirmation",
+            "default": false
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "message"
+        ],
+        "title": "DocumentIssue"
+      },
       "DocumentRunInput": {
         "properties": {
           "expected_revision": {
@@ -2279,6 +2401,18 @@
             "maxLength": 20000,
             "title": "Instruction",
             "default": ""
+          },
+          "resume_from": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 100
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resume From"
           }
         },
         "additionalProperties": false,

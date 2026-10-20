@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import date
+from uuid import uuid4
 
 import pytest
 from conftest import FixtureRuntime, run_operation
@@ -11,8 +12,9 @@ from ai_job_search.applications import ApplicationService
 from ai_job_search.documents import DocumentService
 from ai_job_search.errors import AppError
 from ai_job_search.jobs import JobService
-from ai_job_search.models import Decision, DocumentContent, OutcomeInput, SubmissionInput
+from ai_job_search.models import Decision, DocumentContent, DraftPair, OutcomeInput, Review, SubmissionInput
 from ai_job_search.profile import ProfileService
+from ai_job_search.storage import encoded
 from ai_job_search.workflows import WorkflowService
 
 
@@ -54,6 +56,228 @@ def timed_out_preparation(workspace, profile):
     failed = finish_preparation(workspace, runtime, response)
     assert failed["status"] == "failed" and failed["error_code"] == "ai_timeout"
     return response, failed
+
+
+class EvidenceRuntime(FixtureRuntime):
+    def __init__(self, *, bad_draft=False, bad_reviews=0, bad_repairs=False):
+        super().__init__()
+        self.bad_draft = bad_draft
+        self.bad_reviews = bad_reviews
+        self.bad_repairs = bad_repairs
+
+    async def generate(self, run_id, stage, data, *args, **kwargs):
+        result = await super().generate(run_id, stage, data, *args, **kwargs)
+        if stage == "draft" and self.bad_draft:
+            result.cv.blocks[1].evidence_ids = []
+        if stage.startswith("independent_review_") and self.bad_reviews:
+            self.bad_reviews -= 1
+            result.revised.cv.blocks[1].evidence_ids = []
+        if stage.startswith("repair_") and not self.bad_repairs:
+            for content in (result.cv, result.cover_letter):
+                for block in content.blocks:
+                    if block.kind in ("entry", "bullet") and not block.evidence_ids:
+                        block.evidence_ids = [data["evidence"][0]["id"]]
+                    for claim in block.bullets:
+                        if not claim.evidence_ids:
+                            claim.evidence_ids = [data["evidence"][0]["id"]]
+        return result
+
+
+def test_repairs_evidence_before_independent_review(confirmed, fixture_documents):
+    runtime = EvidenceRuntime(bad_draft=True)
+    response, _, _ = approved_application(confirmed, runtime)
+    result = finish_preparation(confirmed, runtime, response)
+    assert result["status"] == "succeeded", result
+    stages = [call["stage"] for call in runtime.calls]
+    assert "independent_review_1" not in stages
+    assert stages.index("repair_2") < stages.index("independent_review_2") < stages.index("grounding_2")
+    repair = next(call for call in runtime.calls if call["stage"] == "repair_2")
+    assert repair["data"]["actual_verification_findings"][0]["code"] == "missing_evidence"
+    with confirmed.store.connect() as connection:
+        step = connection.execute(
+            "SELECT status,output_json FROM steps WHERE run_id=? AND stage='evidence_preflight_1'",
+            (result["id"],),
+        ).fetchone()
+    assert step["status"] == "failed" and "missing_evidence" in step["output_json"]
+    for call in runtime.calls:
+        if call["stage"].startswith("independent_review_"):
+            DocumentService.evidence_check(
+                DraftPair.model_validate(call["data"]["drafts"]),
+                {item["id"] for item in call["data"]["evidence"]},
+            )
+
+
+def test_repairs_legacy_saved_evidence_before_retry_review(api, profile, fixture_documents):
+    client, app = api
+    workspace = app.state.workspace
+    response, failed = timed_out_preparation(workspace, profile)
+    applications = ApplicationService(workspace)
+    document = applications.get(response["application_id"])["documents"]["cv"]
+    content = DocumentContent.model_validate(document["content"])
+    content.blocks[1].evidence_ids = []
+    applications.save_content("legacy-evidence", response["application_id"], "cv", content, document["revision"])
+    queued = client.post(f"/api/v1/runs/{failed['id']}/retry", json={})
+    assert queued.status_code == 202, queued.text
+    runtime = EvidenceRuntime()
+    result = finish_preparation(workspace, runtime, {"preparation_run_id": queued.json()["run_id"]})
+    assert result["status"] == "succeeded", result
+    stages = [call["stage"] for call in runtime.calls]
+    assert "draft" not in stages and "independent_review_1" not in stages
+    assert stages.index("repair_2") < stages.index("independent_review_2")
+
+
+def test_reviewer_missing_evidence_is_repaired_and_independently_reviewed_again(confirmed, fixture_documents):
+    runtime = EvidenceRuntime(bad_reviews=1)
+    response, _, _ = approved_application(confirmed, runtime)
+    result = finish_preparation(confirmed, runtime, response)
+    assert result["status"] == "succeeded", result
+    stages = [call["stage"] for call in runtime.calls]
+    assert "grounding_1" not in stages
+    assert stages.index("independent_review_1") < stages.index("repair_2") < stages.index("independent_review_2")
+    assert "grounding_2" in stages
+    with confirmed.store.connect() as connection:
+        assert connection.execute(
+            "SELECT status FROM steps WHERE run_id=? AND stage='evidence_review_1'", (result["id"],),
+        ).fetchone()["status"] == "failed"
+        assert connection.execute(
+            "SELECT COUNT(*) FROM steps WHERE run_id=? AND stage LIKE 'compile_%_1'", (result["id"],),
+        ).fetchone()[0] == 0
+
+
+@pytest.mark.parametrize("failure", ["draft", "review"])
+def test_invalid_evidence_stops_after_bounded_repairs_without_publication(confirmed, fixture_documents, failure):
+    runtime = EvidenceRuntime(bad_draft=failure == "draft", bad_reviews=3 if failure == "review" else 0,
+                              bad_repairs=failure == "draft")
+    response, _, _ = approved_application(confirmed, runtime)
+    result = finish_preparation(confirmed, runtime, response)
+    assert result["status"] == "awaiting_user" and result["error_code"] is None, result
+    assert result["approvals"][0]["kind"] == "document_review"
+    assert result["result"]["issues"][0]["kind"] == "evidence"
+    stages = [call["stage"] for call in runtime.calls]
+    assert len([stage for stage in stages if stage.startswith("repair_")]) == 2
+    assert len([stage for stage in stages if stage.startswith("independent_review_")]) == (3 if failure == "review" else 0)
+    assert not any(stage.startswith(("grounding_", "visual_")) for stage in stages)
+    applications = ApplicationService(confirmed)
+    saved = applications.get(response["application_id"])
+    assert saved["documents"] and not saved["published"] and saved["status"] == "preparing"
+    assert not applications.tracker()[1]
+    with confirmed.store.connect() as connection:
+        assert connection.execute(
+            "SELECT COUNT(*) FROM steps WHERE run_id=? AND stage LIKE 'compile_%'", (result["id"],),
+        ).fetchone()[0] == 0
+
+
+def test_document_retry_does_not_replay_a_legacy_rejected_review(api, profile, fixture_documents):
+    client, app = api
+    workspace = app.state.workspace
+    response, failed = timed_out_preparation(workspace, profile)
+    application = ApplicationService(workspace).get(response["application_id"])
+    pair = DraftPair.model_validate({kind: item["content"] for kind, item in application["documents"].items()})
+    pair.cv.blocks[1].evidence_ids = []
+    with workspace.store.connect() as connection:
+        legacy_step = connection.execute(
+            "SELECT id FROM steps WHERE run_id=? AND stage='independent_review_1'", (failed["id"],),
+        ).fetchone()["id"]
+    workspace.store.finish_step(legacy_step, Review(revised=pair).model_dump(mode="json"))
+    queued = client.post(f"/api/v1/runs/{failed['id']}/retry", json={})
+    assert queued.status_code == 202, queued.text
+    runtime = FixtureRuntime()
+    result = finish_preparation(workspace, runtime, {"preparation_run_id": queued.json()["run_id"]})
+    assert result["status"] == "succeeded", result
+    assert any(call["stage"] == "independent_review_1" for call in runtime.calls)
+    with workspace.store.connect() as connection:
+        hashes = connection.execute(
+            "SELECT input_hash FROM steps WHERE run_id IN (?,?) AND stage='independent_review_1'",
+            (failed["id"], result["id"]),
+        ).fetchall()
+    assert len(hashes) == 2 and hashes[0]["input_hash"] == hashes[1]["input_hash"]
+
+
+def test_repaired_drafts_survive_a_later_independent_review_timeout(confirmed, fixture_documents):
+    class RepairThenTimeout(EvidenceRuntime):
+        async def generate(self, run_id, stage, *args, **kwargs):
+            if stage == "independent_review_2":
+                raise AppError("ai_timeout", "Synthetic review timeout after evidence repair.", 504)
+            return await super().generate(run_id, stage, *args, **kwargs)
+
+    runtime = RepairThenTimeout(bad_draft=True)
+    response, _, _ = approved_application(confirmed, runtime)
+    result = finish_preparation(confirmed, runtime, response)
+    assert result["status"] == "failed" and result["error_code"] == "ai_timeout", result
+    application = ApplicationService(confirmed).get(response["application_id"])
+    assert application["documents"]["cv"]["content"]["blocks"][1]["evidence_ids"]
+    assert application["documents"]["cv"]["stale"] and not application["published"]
+    assert application["last_run_id"] == result["id"]
+
+
+def test_evidence_repair_does_not_overwrite_concurrent_document_edits(confirmed, fixture_documents):
+    class ConcurrentRepair(EvidenceRuntime):
+        async def generate(self, run_id, stage, *args, **kwargs):
+            result = await super().generate(run_id, stage, *args, **kwargs)
+            if stage == "repair_2":
+                application_id = confirmed.store.run(run_id)["input"]["application_id"]
+                applications = ApplicationService(confirmed)
+                document = applications.get(application_id)["documents"]["cv"]
+                content = DocumentContent.model_validate(document["content"])
+                content.blocks[0].heading = "Concurrent manual correction"
+                applications.save_content("concurrent-repair-edit", application_id, "cv", content, document["revision"])
+            return result
+
+    runtime = ConcurrentRepair(bad_draft=True)
+    response, _, _ = approved_application(confirmed, runtime)
+    result = finish_preparation(confirmed, runtime, response)
+    assert result["status"] == "failed" and result["error_code"] == "external_edit", result
+    assert not any(call["stage"].startswith("independent_review_") for call in runtime.calls)
+    saved = ApplicationService(confirmed).get(response["application_id"])
+    assert saved["documents"]["cv"]["content"]["blocks"][0]["heading"] == "Concurrent manual correction"
+
+
+@pytest.mark.parametrize("status", ["failed", "cancelled", "succeeded", "queued"])
+@pytest.mark.parametrize("published", [False, True])
+def test_latest_document_attempt_is_separate_from_draft_provenance(api, profile, fixture_documents, status, published):
+    client, app = api
+    workspace = app.state.workspace
+    response, _ = timed_out_preparation(workspace, profile)
+    applications = ApplicationService(workspace)
+    if published:
+        current = applications.get(response["application_id"])
+        prepared = run_operation(workspace, FixtureRuntime(), "documents", {
+            "application_id": current["id"], "expected_revision": current["revision"],
+        })
+        assert prepared["status"] == "succeeded", prepared
+    current = applications.get(response["application_id"])
+    manifest_path = applications.manifest_location(current)
+    manifest = workspace.read(manifest_path)
+    attempt_id = str(uuid4())
+    workspace.store.enqueue(attempt_id, "documents", {"application_id": current["id"]}, "test-policy")
+    if status != "queued":
+        workspace.store.finish(attempt_id, status=status)
+    workspace.store.enqueue(str(uuid4()), "documents", {"application_id": str(uuid4())}, "test-policy")
+    workspace.store.enqueue(str(uuid4()), "evaluate", {"application_id": current["id"]}, "test-policy")
+    result = client.get(f"/api/v1/applications/{current['id']}")
+    assert result.status_code == 200, result.text
+    view = result.json()
+    assert view["latest_run_id"] == attempt_id
+    assert view["last_run_id"] == current["last_run_id"]
+    assert view["revision"] == current["revision"]
+    assert workspace.read(manifest_path) == manifest
+
+
+def test_latest_document_attempt_is_found_beyond_the_activity_page(api, profile, fixture_documents):
+    client, app = api
+    workspace = app.state.workspace
+    response, failed = timed_out_preparation(workspace, profile)
+    with workspace.store.connect(write=True) as connection:
+        for index in range(55):
+            connection.execute(
+                "INSERT INTO runs(id,kind,status,input_json,policy_hash,created_at,updated_at) VALUES (?,?,?,?,?,?,?)",
+                (str(uuid4()), "documents", "succeeded", encoded({"application_id": str(uuid4())}),
+                 "test-policy", f"2099-01-01T00:00:{index:02d}.000+00:00", "2099-01-01T00:01:00.000+00:00"),
+            )
+    recent = client.get("/api/v1/runs?limit=50").json()
+    assert len(recent["items"]) == 50 and failed["id"] not in {item["id"] for item in recent["items"]}
+    view = client.get(f"/api/v1/applications/{response['application_id']}").json()
+    assert view["latest_run_id"] == failed["id"]
 
 
 @pytest.mark.parametrize("retry_stale_run", [False, True])
@@ -270,7 +494,10 @@ def test_grounding_failure_never_publishes_or_marks_drafted(confirmed, fixture_d
     runtime = FixtureRuntime(unsupported=True)
     response, _, _ = approved_application(confirmed, runtime)
     result = finish_preparation(confirmed, runtime, response)
-    assert result["status"] == "failed" and result["error_code"] == "grounding_failed"
+    assert result["status"] == "awaiting_user" and result["error_code"] is None
+    assert result["approvals"][0]["kind"] == "document_review"
+    assert result["result"]["issues"][0]["message"] == "Unsupported metric."
+    assert len([call for call in runtime.calls if call["stage"].startswith("repair_")]) == 2
     assert ApplicationService(confirmed).tracker()[1] == []
     application = ApplicationService(confirmed).get(response["application_id"])
     assert application["documents"]["cv"]["stale"] is True
@@ -297,8 +524,14 @@ def test_actual_failure_stops_after_three_compile_cycles(confirmed, fixture_docu
     monkeypatch.setattr(DocumentService, "verify", failed)
     response, _, _ = approved_application(confirmed, runtime)
     result = finish_preparation(confirmed, runtime, response)
-    assert result["status"] == "failed" and result["error_code"] == "repair_limit_reached"
-    assert len([call for call in runtime.calls if call["stage"].startswith("independent_review_")]) == 3
+    assert result["status"] == "awaiting_user" and result["approvals"][0]["kind"] == "document_review"
+    assert len([call for call in runtime.calls if call["stage"].startswith("repair_")]) == 2
+    assert len([call for call in runtime.calls if call["stage"].startswith("independent_review_")]) == 1
+    with confirmed.store.connect() as connection:
+        steps = connection.execute(
+            "SELECT status FROM steps WHERE run_id=? AND stage LIKE 'compile_%'", (result["id"],),
+        ).fetchall()
+    assert len(steps) == 6 and all(step["status"] == "failed" for step in steps)
     assert not ApplicationService(confirmed).tracker()[1]
 
 
@@ -398,7 +631,15 @@ def test_changed_verification_inputs_prevent_submission(confirmed, fixture_docum
 
 
 def test_every_company_claim_needs_separate_independent_verification(confirmed, fixture_documents, monkeypatch):
-    runtime = FixtureRuntime()
+    class CompanyClaimsRuntime(FixtureRuntime):
+        async def generate(self, run_id, stage, *args, **kwargs):
+            result = await super().generate(run_id, stage, *args, **kwargs)
+            if stage.startswith("independent_review_"):
+                result.company_claims = ["First independently verified claim", "Second independent claim"]
+                result.revised.cover_letter.blocks[1].text = ". ".join(result.company_claims)
+            return result
+
+    runtime = CompanyClaimsRuntime()
     service = WorkflowService(confirmed, runtime)
     sources = [{"id": f"company:{index}", "claim": claim, "quote": "A sufficiently long synthetic evidence quote.",
                 "url": f"https://example.invalid/source-{index}"}
@@ -411,6 +652,6 @@ def test_every_company_claim_needs_separate_independent_verification(confirmed, 
     monkeypatch.setattr(WorkflowService, "company_research", company_research)
     response, _, _ = approved_application(confirmed, runtime)
     result = finish_preparation(confirmed, runtime, response)
-    assert result["status"] == "failed" and result["error_code"] == "company_claims_unverified"
-    assert result["result"]["claims"] == ["Second independent claim"]
+    assert result["status"] == "awaiting_user" and result["approvals"][0]["kind"] == "document_review"
+    assert [issue["quote"] for issue in result["result"]["issues"]] == ["Second independent claim"]
     assert not service.applications.tracker()[1]

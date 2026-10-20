@@ -4,6 +4,7 @@ import io
 import re
 import shutil
 from pathlib import Path
+from typing import NotRequired, TypedDict
 
 from .errors import AppError
 from .models import DocumentContent, DraftPair, Profile
@@ -205,6 +206,15 @@ def master_cv(profile: Profile, resources: Path, original: str = "", previous: P
     return preamble + "\\begin{document}\n\\makecvtitle\n" + intro + "\n".join(sections) + "\n\\end{document}\n"
 
 
+class EvidenceFinding(TypedDict):
+    document: str
+    code: str
+    message: str
+    block_id: NotRequired[str]
+    block_index: NotRequired[int]
+    claim_id: NotRequired[str]
+
+
 class DocumentService:
     def __init__(self, resources: Path):
         self.resources = resources
@@ -212,18 +222,34 @@ class DocumentService:
         self.layout_helper = load_helper(resources, "verify_layout")
 
     @staticmethod
-    def evidence_check(pair: DraftPair, valid_ids: set[str]) -> None:
+    def evidence_findings(pair: DraftPair, valid_ids: set[str]) -> list[EvidenceFinding]:
+        findings: list[EvidenceFinding] = []
         for kind, content in (("cv", pair.cv), ("cover_letter", pair.cover_letter)):
             if not content.blocks:
-                raise AppError("empty_document", f"The {kind} draft has no content.", 422)
-            for block in content.blocks:
+                findings.append({"document": kind, "code": "empty_document",
+                                 "message": f"The {kind} draft has no content."})
+            for index, block in enumerate(content.blocks):
+                location = {"document": kind, "block_id": block.id, "block_index": index}
                 if any(evidence not in valid_ids for evidence in block.evidence_ids):
-                    raise AppError("invalid_evidence", "A draft references evidence outside its approved snapshot.", 422)
-                if block.kind == "entry" and not block.evidence_ids:
-                    raise AppError("missing_evidence", "A draft entry has no supporting profile evidence.", 422)
+                    findings.append({**location, "code": "invalid_evidence",
+                                     "message": "Replace references outside the approved evidence snapshot with genuine supporting evidence, or remove unsupported claims."})
+                if block.kind in ("entry", "bullet") and not block.evidence_ids:
+                    findings.append({**location, "code": "missing_evidence",
+                                     "message": f"This {block.kind} needs supporting evidence IDs from the approved snapshot."})
                 for bullet in block.bullets:
-                    if not bullet.evidence_ids or any(evidence not in valid_ids for evidence in bullet.evidence_ids):
-                        raise AppError("invalid_evidence", "An achievement has no valid profile evidence.", 422)
+                    if not bullet.evidence_ids:
+                        findings.append({**location, "claim_id": bullet.id, "code": "missing_evidence",
+                                         "message": "This achievement needs supporting evidence IDs from the approved snapshot."})
+                    elif any(evidence not in valid_ids for evidence in bullet.evidence_ids):
+                        findings.append({**location, "claim_id": bullet.id, "code": "invalid_evidence",
+                                         "message": "This achievement references evidence outside the approved snapshot; cite genuine support or remove the unsupported claim."})
+        return findings
+
+    @staticmethod
+    def evidence_check(pair: DraftPair, valid_ids: set[str]) -> None:
+        findings = DocumentService.evidence_findings(pair, valid_ids)
+        if findings:
+            raise AppError(findings[0]["code"], findings[0]["message"], 422, detail={"findings": findings})
 
     def compile(self, kind: str, profile: Profile, content: DocumentContent, company: str,
                 directory: Path) -> Path:

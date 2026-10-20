@@ -198,7 +198,10 @@ class Evaluation(Model):
 class Claim(Model):
     id: str = Field(default_factory=lambda: str(uuid4()))
     text: Text
-    evidence_ids: list[str] = Field(default_factory=list, max_length=30)
+    evidence_ids: list[str] = Field(
+        default_factory=list, max_length=30,
+        description="Supporting IDs from the supplied evidence snapshot. Required for every achievement; preserve valid references during revision.",
+    )
 
 
 class DocumentBlock(Model):
@@ -210,7 +213,10 @@ class DocumentBlock(Model):
     location: Short = ""
     start: Short = ""
     end: Short = ""
-    evidence_ids: list[str] = Field(default_factory=list, max_length=30)
+    evidence_ids: list[str] = Field(
+        default_factory=list, max_length=30,
+        description="Supporting IDs from the supplied evidence snapshot. Required for entry and bullet blocks. Preserve references when revising supported claims; never invent IDs.",
+    )
     bullets: list[Claim] = Field(default_factory=list, max_length=30)
 
 
@@ -239,6 +245,11 @@ class ResearchSource(Model):
 class Review(Model):
     findings: list[ReviewFinding] = Field(default_factory=list, max_length=80)
     sources: list[ResearchSource] = Field(default_factory=list, max_length=8)
+    company_claims: list[Text] = Field(
+        default_factory=list, max_length=8,
+        description="Every factual claim about the target employer in the revised documents, verbatim. Exclude the candidate's employment history.",
+    )
+    assessment_warnings: list[Text] = Field(default_factory=list, max_length=30)
     revised: DraftPair
 
 
@@ -247,15 +258,45 @@ class VisualReview(Model):
     findings: list[Text] = Field(default_factory=list, max_length=30)
 
 
+class DocumentIssue(Model):
+    kind: Literal["grounding", "company", "evidence", "layout"] = "grounding"
+    document: Literal["cv", "cover_letter"] | None = None
+    block_id: str = ""
+    claim_id: str = ""
+    quote: Text = ""
+    message: Text
+    evidence_ids: list[str] = Field(default_factory=list, max_length=30)
+    suggestion: Text = ""
+    needs_confirmation: bool = False
+
+
 class GroundingReview(Model):
     supported: bool
-    findings: list[Text] = Field(default_factory=list, max_length=60)
+    findings: list[Text] = Field(
+        default_factory=list, max_length=60,
+        description="Blocking candidate-claim problems in the final documents only. Positive observations and assessment commentary belong in notes, not findings.",
+    )
+    issues: list[DocumentIssue] = Field(default_factory=list, max_length=60)
+    notes: list[Text] = Field(default_factory=list, max_length=30)
+    assessment_warnings: list[Text] = Field(default_factory=list, max_length=30)
     company_claims: list[Text] = Field(default_factory=list, max_length=8)
 
 
 class CompanyResearch(Model):
     sources: list[ResearchSource] = Field(default_factory=list, max_length=8)
     limitations: list[Text] = Field(default_factory=list, max_length=15)
+
+
+class DocumentReviewCheckpoint(Model):
+    documents_hash: str
+    review: Review
+    grounding: GroundingReview
+    company_research: CompanyResearch
+    additional_company_research: CompanyResearch = Field(default_factory=CompanyResearch)
+
+    @property
+    def company_sources(self) -> list[ResearchSource]:
+        return [*self.company_research.sources, *self.additional_company_research.sources]
 
 
 class ExtractedProfile(Model):
@@ -279,6 +320,7 @@ class DocumentEdit(Model):
 class DocumentRunInput(Model):
     expected_revision: Revision
     instruction: Text = ""
+    resume_from: str | None = Field(default=None, max_length=100)
 
 
 class ApplicationInput(Model):
@@ -414,6 +456,12 @@ class ApplicationView(Model):
     evaluation: dict[str, JsonValue] | None = None
     review: dict[str, JsonValue] | None = None
     last_run_id: str | None = None
+    latest_run_id: str | None = None
+    preparation_cost_usd: float = 0
+    preparation_attempts: int = 0
+    review_checkpoint_available: bool = False
+    next_run_limit_usd: float | None = None
+    content_issues: list[DocumentIssue] = Field(default_factory=list)
     model_config = ConfigDict(extra="allow")
 
 

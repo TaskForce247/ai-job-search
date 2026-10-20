@@ -149,6 +149,29 @@ def test_stage_and_artifact_events_are_durable_and_recovery_closes_active_steps(
     assert recovered["status"] == "interrupted" and recovered["completed_at"]
 
 
+def test_failed_validation_step_is_durable_without_stopping_repair(workspace):
+    store = workspace.store
+    run_id = str(uuid4())
+    store.enqueue(run_id, "test", {}, "policy")
+    store.claim("test-worker")
+    rejected = store.stage(run_id, "evidence_preflight_1", "Checking evidence links.")
+    store.finish_step(rejected, {"findings": [{"code": "missing_evidence"}]}, status="failed")
+    assert store.run(run_id)["status"] == "running"
+    repaired = store.stage(run_id, "repair_2", "Repairing evidence links.")
+    store.finish_step(repaired, {"repaired": True})
+    store.finish(run_id, {"verified": True})
+    with store.connect() as connection:
+        failed = connection.execute("SELECT status,output_json,completed_at FROM steps WHERE id=?", (rejected,)).fetchone()
+        events = connection.execute(
+            "SELECT type,stage FROM events WHERE run_id=? ORDER BY sequence", (run_id,),
+        ).fetchall()
+    assert failed["status"] == "failed" and failed["completed_at"]
+    assert json.loads(failed["output_json"])["findings"][0]["code"] == "missing_evidence"
+    assert ("stage.failed", "evidence_preflight_1") in [(item["type"], item["stage"]) for item in events]
+    assert ("stage.completed", "evidence_preflight_1") not in [(item["type"], item["stage"]) for item in events]
+    assert store.run(run_id)["status"] == "succeeded"
+
+
 def test_readers_do_not_observe_a_half_published_tracker_and_archive(workspace, monkeypatch):
     writer = ApplicationService(workspace)
     application = writer.create_external("external", str(uuid4()), ApplicationInput(

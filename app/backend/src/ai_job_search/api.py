@@ -485,12 +485,53 @@ def create_app(config: Config | None = None, *, on_shutdown: Callable[[], None] 
 
     @app.post(PREFIX + "/applications/{application_id}/document-runs", status_code=202, response_model=Queued)
     def document_run(application_id: str, data: DocumentRunInput, request: Request):
-        application = ApplicationService(ws()).get(application_id)
-        if application["revision"] != data.expected_revision:
-            raise AppError("revision_conflict", "The application changed. Reload before compiling.", 409)
-        return {"run_id": workflows().enqueue(operation(request), "documents", {
-            **data.model_dump(mode="json"), "application_id": application_id,
-        }), "application_id": application_id}
+        with ws().lock():
+            run_id = operation(request)
+            with ws().store.connect() as connection:
+                existing = connection.execute("SELECT id FROM runs WHERE id=?", (run_id,)).fetchone()
+            inputs = {**data.model_dump(mode="json", exclude={"resume_from"}), "application_id": application_id}
+            if existing:
+                saved = ws().store.run(run_id)
+                if (saved["kind"] != "documents" or any(saved["input"].get(key) != value for key, value in inputs.items())
+                        or (data.resume_from and saved["input"].get("_retry_of") != data.resume_from)):
+                    raise AppError("idempotency_conflict", "This operation key was already used for different document inputs.", 409)
+                return {"run_id": run_id, "application_id": application_id}
+            application = ApplicationService(ws()).get(application_id)
+            if application["revision"] != data.expected_revision:
+                raise AppError("revision_conflict", "The application changed. Reload before continuing its checks.", 409)
+            with ws().store.connect() as connection:
+                active = connection.execute(
+                    "SELECT id FROM runs WHERE kind='documents' AND status IN ('queued','running') "
+                    "AND json_extract(input_json,'$.application_id')=? LIMIT 1", (application_id,),
+                ).fetchone()
+            if active:
+                raise AppError("operation_in_progress", "Document checks are already in progress. Follow the current operation instead.", 409)
+            source_id = data.resume_from or application["latest_run_id"]
+            source = ws().store.run(source_id) if source_id else None
+            pending = []
+            bundle = None
+            if source:
+                if source["kind"] != "documents" or source["input"].get("application_id") != application_id:
+                    raise AppError("invalid_document_resume", "Choose a document operation for this application.", 409)
+                if source["status"] in ("queued", "running"):
+                    raise AppError("operation_in_progress", "Document checks are already in progress. Follow the current operation instead.", 409)
+                pending = [approval for approval in source["approvals"] if approval["status"] == "pending"]
+                if any(approval["kind"] not in ("document_correction", "document_review") for approval in pending):
+                    raise AppError("pending_document_decision", "Accept or reject the existing rewrite before starting another check.", 409)
+                if pending and any(approval["proposal"]["expected_revision"] == application["revision"] for approval in pending):
+                    raise AppError("document_correction_required", "Accept the proposed corrections, or save your manual edits before resuming checks.", 409)
+                bundle = workflows().bundle(source["id"])
+                if bundle["hash"] != workflows().policy.bundle("apply")["hash"]:
+                    raise AppError("policy_changed", "The workflow policy changed. Evaluate this role again before continuing.", 409)
+                inputs["_retry_of"] = source["id"]
+            queued = workflows().enqueue(run_id, "documents", inputs, pinned_policy=bundle)
+            if pending:
+                for approval in pending:
+                    ws().store.record_decision(approval["id"], "reject", approval["revision"])
+                ws().store.finish(source["id"], {
+                    "application_id": application_id, "continued_as": queued, "manual_edits_preserved": True,
+                })
+            return {"run_id": queued, "application_id": application_id}
 
     @app.post(PREFIX + "/applications/{application_id}/submissions", response_model=ApplicationView)
     def submit(application_id: str, data: SubmissionInput, request: Request):

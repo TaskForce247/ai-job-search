@@ -7,7 +7,7 @@ import time
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterator
+from typing import Iterator, Literal
 from uuid import uuid4
 
 from .errors import AppError
@@ -254,14 +254,15 @@ class Store:
             self._event(connection, run_id, "stage", stage, {"message": message})
         return step_id
 
-    def finish_step(self, step_id: str, output: object) -> None:
+    def finish_step(self, step_id: str, output: object, *, status: Literal["succeeded", "failed"] = "succeeded") -> None:
         with self.connect(write=True) as connection:
             step = connection.execute("SELECT run_id,stage FROM steps WHERE id=?", (step_id,)).fetchone()
             if not step:
                 raise AppError("not_found", "Operation stage not found.", 404)
-            connection.execute("UPDATE steps SET status='succeeded',output_json=?,completed_at=? WHERE id=?",
-                               (encoded(output), now(), step_id))
-            self._event(connection, step["run_id"], "stage.completed", step["stage"], {"step_id": step_id})
+            connection.execute("UPDATE steps SET status=?,output_json=?,completed_at=? WHERE id=?",
+                               (status, encoded(output), now(), step_id))
+            self._event(connection, step["run_id"], "stage.completed" if status == "succeeded" else "stage.failed",
+                        step["stage"], {"step_id": step_id})
 
     def finish(self, run_id: str, result: object = None, *, status: str = "succeeded",
                error: str | None = None, code: str | None = None) -> None:

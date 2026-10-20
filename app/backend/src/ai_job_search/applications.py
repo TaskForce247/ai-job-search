@@ -280,8 +280,38 @@ class ApplicationService:
             _, rows = self.tracker()
             for index, row in enumerate(rows):
                 if self.row_id(row, index) == application_id:
-                    return self._view(row, index)
-            return self._preparation_view(application_id)
+                    application = self._view(row, index)
+                    break
+            else:
+                application = self._preparation_view(application_id)
+            with self.workspace.store.connect() as connection:
+                latest = connection.execute(
+                    "SELECT id,result_json FROM runs WHERE kind='documents' AND json_extract(input_json,'$.application_id')=? "
+                    "ORDER BY created_at DESC,id DESC LIMIT 1", (application_id,),
+                ).fetchone()
+                usage = connection.execute(
+                    "SELECT COUNT(*) AS attempts,COALESCE(SUM(cost_usd),0) AS cost FROM runs "
+                    "WHERE kind='documents' AND json_extract(input_json,'$.application_id')=?", (application_id,),
+                ).fetchone()
+                documents_hash = digest({kind: document["content"] for kind, document in application["documents"].items()})
+                checkpoint = connection.execute(
+                    "SELECT 1 FROM steps JOIN runs ON runs.id=steps.run_id WHERE runs.kind='documents' "
+                    "AND json_extract(runs.input_json,'$.application_id')=? AND steps.stage='document_review' "
+                    "AND steps.status='succeeded' AND json_extract(steps.output_json,'$.documents_hash')=? LIMIT 1",
+                    (application_id, documents_hash),
+                ).fetchone()
+            settings, _ = self.workspace.store.settings()
+            latest_result = json.loads(latest["result_json"] or "null") if latest else None
+            issues = latest_result.get("issues", []) if isinstance(latest_result, dict) else []
+            if not issues and isinstance(latest_result, dict):
+                issues = [{"kind": "grounding", "message": finding} for finding in latest_result.get("findings", [])
+                          if isinstance(finding, str)]
+            return {
+                **application, "latest_run_id": latest["id"] if latest else None,
+                "preparation_cost_usd": usage["cost"], "preparation_attempts": usage["attempts"],
+                "review_checkpoint_available": checkpoint is not None, "next_run_limit_usd": settings.max_run_cost_usd,
+                "content_issues": issues,
+            }
 
     def manifest_location(self, application: dict) -> str:
         if application.get("legacy"):
