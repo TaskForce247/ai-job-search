@@ -193,14 +193,21 @@ export function PortalControls() {
   return <div className="stack">
     <p>Sources can differ in coverage and availability. Danish boards are opt-in.
       freehire focuses on technical roles. Enable only sources appropriate to your search.</p>
+    <p className="hint">Ready to search means the local tools are installed, not that the source is currently reachable.</p>
+    <div><Button variant="secondary" busy={query.isFetching} onClick={() => void query.refetch()}>Refresh sources</Button></div>
     <ErrorPanel error={action.error} />
     {(query.data?.items ?? []).map((portal) => <div key={portal.id} className="portal-row">
-      <div><div className="actions"><h3>{portal.label}</h3><Badge value={portal.effective_enabled ? 'ready' : 'optional'}>
-        {portal.effective_enabled ? 'Enabled & available' : portal.enabled ? 'Enabled · not available' : 'Disabled'}</Badge></div>
+      <div><div className="actions"><h3>{portal.label}</h3><Badge value={portal.effective_enabled ? 'ready' : portal.enabled ? 'setup_required' : 'optional'}>
+        {portal.effective_enabled ? 'Enabled · ready to search' : portal.enabled ? 'Enabled · setup required' : 'Disabled'}</Badge></div>
       {portal.warning && <p className="hint">{portal.warning}</p>}
       {!portal.supported && <p className="field-error">This source is not supported by the current app.</p>}
-      {portal.enabled && !portal.installed_enabled && <p className="hint">The installed source is disabled; complete its approved setup before searching.</p>}
-      <details><summary>Source health</summary><StructuredDetails value={portal.health} /></details></div>
+      {portal.supported && portal.runtime_ready === false && <p className="hint">Local setup is incomplete.
+        Follow "Job search and PDF tools" in the application README to install Bun and the portal dependencies, then refresh sources.</p>}
+      <details><summary>Source health</summary>
+        {(typeof portal.health === 'string' ? portal.health : portal.health.status) === 'not_checked'
+          ? <p className="hint">Not searched yet. Live availability is checked when you run a search.</p>
+          : <StructuredDetails value={portal.health} />}
+      </details></div>
       <div className="actions">
       {portal.enabled && !portal.effective_enabled && portal.id.toLowerCase().includes('linkedin') &&
         <Button variant="secondary" busy={action.isPending} onClick={() => { setChoice(portal); setAcknowledged(false); }}>

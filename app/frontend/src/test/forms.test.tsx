@@ -2,11 +2,11 @@ import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { AIConnection } from '../components/SetupControls';
-import { JobDetailPage, JobImportForm } from '../pages/Jobs';
+import { JobDetailPage, JobImportForm, JobsPage } from '../pages/Jobs';
 import { SubmissionForm } from '../pages/Applications';
 import { ExternalLink } from '../components/ui';
 import { Route, Routes } from 'react-router-dom';
-import { applicationFixture, jobFixture } from './fixtures';
+import { applicationFixture, jobFixture, settingsFixture } from './fixtures';
 import { fetchFixtures, json, renderApp } from './helpers';
 
 describe('real user actions and untrusted input', () => {
@@ -72,6 +72,24 @@ describe('real user actions and untrusted input', () => {
     await user.click(screen.getByRole('button', { name: 'Save API connection' }));
     expect(await screen.findByText('The OS credential store is locked.')).toBeVisible();
     expect(screen.queryByText(/API key saved to/)).not.toBeInTheDocument();
+  });
+
+  it('does not tell users to enable a source that already needs local setup', async () => {
+    fetchFixtures({
+      '/api/v1/settings': settingsFixture,
+      '/api/v1/jobs': { items: [], total: 0, next_cursor: null },
+      '/api/v1/system/readiness': { ai_connected: true, privacy_consent: true, dependencies: [], active_runs: 0, version: 'test', workspace_path: '' },
+      '/api/v1/portals': { items: [
+        { id: 'jobindex-search', label: 'Jobindex', enabled: true, installed_enabled: true, effective_enabled: false,
+          runtime_ready: false, supported: true, warning: '', health: { status: 'not_checked' }, revision: 'portal-r1' },
+        { id: 'jobbank-search', label: 'Jobbank', enabled: false, installed_enabled: false, effective_enabled: false,
+          runtime_ready: true, supported: true, warning: '', health: { status: 'not_checked' }, revision: 'portal-r2' },
+      ] },
+    });
+    renderApp(<JobsPage />);
+    expect(await screen.findByRole('checkbox', { name: 'Jobindex · finish setup in Settings' })).toBeDisabled();
+    expect(screen.getByRole('checkbox', { name: 'Jobbank · enable in Settings' })).toBeDisabled();
+    expect(screen.queryByText('Jobindex · enable in Settings')).not.toBeInTheDocument();
   });
 
   it('renders hostile posting text literally and never creates injected elements', async () => {

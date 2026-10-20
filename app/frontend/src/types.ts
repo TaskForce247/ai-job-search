@@ -54,6 +54,7 @@ export interface Portal {
   installed_enabled: boolean;
   effective_enabled: boolean;
   supported: boolean;
+  runtime_ready?: boolean;
   warning: string | null;
   health: string | Record<string, unknown>;
   revision: string;

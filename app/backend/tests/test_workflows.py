@@ -39,6 +39,115 @@ def finish_preparation(workspace, runtime, response):
     return workspace.store.run(response["preparation_run_id"])
 
 
+def timed_out_preparation(workspace, profile):
+    profiles = ProfileService(workspace)
+    profiles.apply("confirm-profile", profiles.propose(profile, profiles.read().revision))
+
+    class ReviewTimeoutRuntime(FixtureRuntime):
+        async def generate(self, run_id, stage, *args, **kwargs):
+            if stage == "independent_review_1":
+                raise AppError("ai_timeout", "Synthetic independent review timeout.", 504)
+            return await super().generate(run_id, stage, *args, **kwargs)
+
+    runtime = ReviewTimeoutRuntime()
+    response, _, _ = approved_application(workspace, runtime)
+    failed = finish_preparation(workspace, runtime, response)
+    assert failed["status"] == "failed" and failed["error_code"] == "ai_timeout"
+    return response, failed
+
+
+@pytest.mark.parametrize("retry_stale_run", [False, True])
+@pytest.mark.parametrize("edit_before_retry", [False, True])
+def test_document_retry_binds_current_saved_drafts(api, profile, fixture_documents, retry_stale_run, edit_before_retry):
+    client, app = api
+    workspace = app.state.workspace
+    response, failed = timed_out_preparation(workspace, profile)
+    applications = ApplicationService(workspace)
+    source = failed
+    if retry_stale_run:
+        source = run_operation(workspace, FixtureRuntime(), "documents", {**failed["input"], "_retry_of": failed["id"]})
+        assert source["status"] == "failed" and source["error_code"] == "revision_conflict"
+    if edit_before_retry:
+        document = applications.get(response["application_id"])["documents"]["cv"]
+        content = DocumentContent.model_validate(document["content"])
+        content.blocks[0].text = "Saved correction before retry"
+        applications.save_content("saved-correction", response["application_id"], "cv", content, document["revision"])
+    application = applications.get(response["application_id"])
+    saved_drafts = {kind: document["content"] for kind, document in application["documents"].items()}
+    original_inputs = source["input"].copy()
+    assert application["revision"] != original_inputs["expected_revision"]
+    queued = client.post(f"/api/v1/runs/{source['id']}/retry", json={})
+    assert queued.status_code == 202, queued.text
+    assert client.post(f"/api/v1/runs/{source['id']}/retry", json={}).json() == queued.json()
+    retry = workspace.store.run(queued.json()["run_id"])
+    assert retry["input"]["expected_revision"] == application["revision"]
+    assert retry["input"]["_retry_of"] == source["id"]
+    assert retry["policy_hash"] == source["policy_hash"]
+    assert workspace.store.run(source["id"])["input"] == original_inputs
+    assert applications.get(application["id"])["revision"] == application["revision"]
+    runtime = FixtureRuntime()
+    result = finish_preparation(workspace, runtime, {"preparation_run_id": retry["id"]})
+    assert result["status"] == "succeeded", result
+    assert not any(call["stage"] == "draft" for call in runtime.calls)
+    review = next(call for call in runtime.calls if call["stage"] == "independent_review_1")
+    assert review["data"]["drafts"] == saved_drafts
+    assert {kind: document["content"] for kind, document in applications.get(application["id"])["documents"].items()} == saved_drafts
+
+
+@pytest.mark.parametrize("lose_receipt", [False, True])
+def test_document_retry_still_rejects_edits_after_queueing(api, profile, fixture_documents, lose_receipt):
+    client, app = api
+    workspace = app.state.workspace
+    response, failed = timed_out_preparation(workspace, profile)
+    applications = ApplicationService(workspace)
+    application = applications.get(response["application_id"])
+    queued = client.post(f"/api/v1/runs/{failed['id']}/retry", json={})
+    assert queued.status_code == 202, queued.text
+    retry_id = queued.json()["run_id"]
+    document = application["documents"]["cv"]
+    content = DocumentContent.model_validate(document["content"])
+    content.blocks[0].text = "Correction after retry was queued"
+    applications.save_content("concurrent-correction", application["id"], "cv", content, document["revision"])
+    if lose_receipt:
+        with workspace.store.connect(write=True) as connection:
+            connection.execute("DELETE FROM idempotency")
+    repeated = client.post(f"/api/v1/runs/{failed['id']}/retry", json={})
+    assert repeated.status_code == 202, repeated.text
+    assert repeated.json() == queued.json()
+    assert workspace.store.run(retry_id)["input"]["expected_revision"] == application["revision"]
+    runtime = FixtureRuntime()
+    result = finish_preparation(workspace, runtime, {"preparation_run_id": retry_id})
+    assert result["status"] == "failed" and result["error_code"] == "revision_conflict"
+    assert runtime.calls == []
+    assert applications.get(application["id"])["documents"]["cv"]["content"] == content.model_dump(mode="json")
+
+
+@pytest.mark.parametrize("change", ["profile", "posting"])
+def test_document_retry_still_requires_current_evaluation(api, profile, fixture_documents, change):
+    client, app = api
+    workspace = app.state.workspace
+    response, failed = timed_out_preparation(workspace, profile)
+    applications = ApplicationService(workspace)
+    application = applications.get(response["application_id"])
+    if change == "profile":
+        profiles = ProfileService(workspace)
+        current = profiles.read()
+        changed = current.data.model_copy(deep=True)
+        changed.email = "corrected@example.invalid"
+        profiles.apply("corrected-contact", profiles.propose(changed, current.revision))
+    else:
+        jobs = JobService(workspace)
+        job = jobs.get(application["job_id"])
+        jobs.update("changed-posting", job["id"], {"description": job["description"] + "\nChanged requirements."}, job["revision"])
+    queued = client.post(f"/api/v1/runs/{failed['id']}/retry", json={})
+    assert queued.status_code == 202, queued.text
+    runtime = FixtureRuntime()
+    result = finish_preparation(workspace, runtime, {"preparation_run_id": queued.json()["run_id"]})
+    assert result["status"] == "failed" and result["error_code"] == "stale_evaluation"
+    assert runtime.calls == []
+    assert applications.get(application["id"])["documents"] == application["documents"]
+
+
 def test_evaluation_waits_and_survives_a_new_service(confirmed):
     runtime = FixtureRuntime()
     job_id = imported_job(confirmed)

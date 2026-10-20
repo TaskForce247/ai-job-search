@@ -32,7 +32,7 @@ function SearchForm({ settings, portals }: { settings: SettingsView; portals: Po
       {portals.filter((portal) => portal.supported).map((portal) => <label className="checkbox-row" key={portal.id}>
         <input type="checkbox" value={portal.id} disabled={!portal.effective_enabled}
           {...register('portals', { validate: (v) => v.length > 0 || 'Select an available job source. Enable sources in Settings if needed.' })} />
-        <span>{portal.label}{!portal.effective_enabled && <small> · enable in Settings</small>}</span></label>)}
+        <span>{portal.label}{!portal.effective_enabled && <small> · {portal.enabled ? 'finish setup' : 'enable'} in Settings</small>}</span></label>)}
       <Link to="/settings">Manage sources →</Link>
       {errors.portals && <p role="alert" className="field-error">{errors.portals.message}</p>}
     </fieldset>

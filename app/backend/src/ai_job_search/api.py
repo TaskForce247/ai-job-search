@@ -598,8 +598,17 @@ def create_app(config: Config | None = None, *, on_shutdown: Callable[[], None] 
         original = ws().store.run(run_id)
         if original["status"] not in ("failed", "cancelled", "interrupted"):
             raise AppError("run_not_retryable", "Only stopped operations can be retried.", 409)
+        retry_id = operation(request)
+        with ws().store.connect() as connection:
+            existing = connection.execute("SELECT id FROM runs WHERE id=?", (retry_id,)).fetchone()
+        if existing:
+            return {"run_id": retry_id}
         inputs = {**original["input"], "_retry_of": run_id}
-        return {"run_id": workflows().enqueue(operation(request), original["kind"], inputs,
+        if original["kind"] == "documents":
+            # Saved drafts advance the revision; pin this retry now, not when its worker starts.
+            application = ApplicationService(ws()).get(inputs["application_id"])
+            inputs["expected_revision"] = application["revision"]
+        return {"run_id": workflows().enqueue(retry_id, original["kind"], inputs,
                                                pinned_policy=workflows().bundle(run_id))}
 
     @app.post(PREFIX + "/approvals/{approval_id}/decision")

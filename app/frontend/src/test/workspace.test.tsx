@@ -51,6 +51,47 @@ describe('guided local setup and source permissions', () => {
     expect(JSON.parse(String(change?.[1]?.body))).toEqual({ enabled: true, acknowledged: true, expected_revision: 'portal-r1' });
   });
 
+  it.each(['not_checked', { status: 'not_checked' }])('separates local setup from source health and refreshes installed tools (%j)', async (health) => {
+    const user = userEvent.setup();
+    let runtimeReady = false;
+    const fetch = fetchFixtures({
+      '/api/v1/portals': () => new Response(JSON.stringify({ items: [{
+        id: 'jobindex-search', label: 'Jobindex', enabled: true, installed_enabled: true,
+        effective_enabled: runtimeReady, runtime_ready: runtimeReady,
+        supported: true, warning: '', health, revision: 'portal-r1',
+      }] })),
+    });
+    renderApp(<PortalControls />);
+    expect(await screen.findByText('Enabled · setup required')).toBeVisible();
+    expect(screen.getByText(/Local setup is incomplete/)).toBeVisible();
+    await user.click(screen.getByText('Source health'));
+    expect(screen.getByText('Not searched yet. Live availability is checked when you run a search.')).toBeVisible();
+    expect(screen.queryByText('not_checked')).not.toBeInTheDocument();
+    runtimeReady = true;
+    await user.click(screen.getByRole('button', { name: 'Refresh sources' }));
+    expect(await screen.findByText('Enabled · ready to search')).toBeVisible();
+    expect(screen.queryByText(/Local setup is incomplete/)).not.toBeInTheDocument();
+    expect(screen.getByText('Not searched yet. Live availability is checked when you run a search.')).toBeVisible();
+    expect(fetch.mock.calls.filter((call) => call[0] === '/api/v1/portals')).toHaveLength(2);
+    expect(fetch.mock.calls.some((call) => call[1]?.method === 'PATCH')).toBe(false);
+  });
+
+  it('keeps the last live source error visible when local tools are ready', async () => {
+    const user = userEvent.setup();
+    fetchFixtures({
+      '/api/v1/portals': { items: [{
+        id: 'jobindex-search', label: 'Jobindex', enabled: true, installed_enabled: true,
+        effective_enabled: true, runtime_ready: true, supported: true, warning: '',
+        health: { status: 'unavailable', last_error: 'Synthetic source could not be reached.' }, revision: 'portal-r1',
+      }] },
+    });
+    renderApp(<PortalControls />);
+    expect(await screen.findByText('Enabled · ready to search')).toBeVisible();
+    await user.click(screen.getByText('Source health'));
+    expect(screen.getByText('Synthetic source could not be reached.')).toBeVisible();
+    expect(screen.queryByText(/Not searched yet/)).not.toBeInTheDocument();
+  });
+
   it('provides a confirmed guided dependency repair rather than a terminal command', async () => {
     const user = userEvent.setup();
     const fetch = fetchFixtures({

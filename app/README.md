@@ -116,6 +116,12 @@ preserves saved checkpoints; an interrupted AI request may still incur charges.
 - To resume, start the two services again and open the new terminal-issued link.
   Your saved workspace is not deleted by stopping either service.
 
+For failed document preparation, **Retry operation** reuses saved drafts and
+binds the new operation to the application's current saved version. It does not
+reuse the version from before the drafts were saved. Later edits still stop
+preparation rather than being overwritten. Retries may incur additional API
+charges, and all required review and verification must still pass.
+
 ## Alternative: one server with a built frontend
 
 For ordinary use without hot reload, build the frontend once, then run only
@@ -180,7 +186,7 @@ then record the actual submission date. Submitted document revisions are frozen.
 |---|---|
 | Paste a posting, edit your profile, track applications | None beyond the app prerequisites |
 | AI assessments and drafting | Anthropic API key, cloud consent, and spending limits in Settings |
-| Search Freehire / LinkedIn | [Bun](https://bun.sh/); LinkedIn also requires its explicit terms/access acknowledgement |
+| Search bundled job sources | [Bun](https://bun.sh/); Danish adapters also need their npm dependencies below. LinkedIn requires its explicit terms/access acknowledgement |
 | Compile stock CV and cover letter | LuaLaTeX and XeLaTeX from [MiKTeX](https://miktex.org/), [TeX Live](https://tug.org/texlive/), or [MacTeX](https://tug.org/mactex/) |
 | Full PDF layout verification | Poppler `pdftotext` and `pdfinfo` |
 
@@ -199,7 +205,28 @@ visible.
 
 Freehire and LinkedIn have zero runtime npm dependencies. Other bundled portal
 adapters need their declared dependencies installed and their source enabled;
-use the existing [portal setup](../README.md#2-install-job-search-tools).
+install them once from the repository root:
+
+Windows PowerShell:
+
+```powershell
+# Also find Bun if it was installed through the app's Settings.
+$env:PATH = "$env:LOCALAPPDATA\AIJobSearch\runtimes\bun;$env:PATH"
+& .\app\backend\.venv\Scripts\python.exe .\tools\install_portal_clis.py
+```
+
+macOS / Linux, with Bun on `PATH`:
+
+```bash
+app/backend/.venv/bin/python tools/install_portal_clis.py
+```
+
+The installer discovers the portal manifests and skips unsafe lifecycle hooks.
+After installation, choose **Settings -> Refresh sources** (or reload the page).
+**Enabled - setup required** means a source is selected but its local tools or
+access acknowledgement are incomplete. **Enabled - ready to search** means
+local setup is complete, not that a live request has succeeded. Source health
+starts as **Not searched yet** and records the result when you run a search.
 
 ## Troubleshooting
 
