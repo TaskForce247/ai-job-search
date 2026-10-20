@@ -7,22 +7,39 @@ automatic application submissions in the production app.
 
 ## Development
 
-Run these commands from `app\frontend`:
+Install the backend as described in the [application startup guide](../README.md).
+From `app\frontend`, start the frontend first:
 
 ```powershell
-npm ci
-npm run dev
+npm.cmd ci
+npm.cmd run dev
 ```
+
+Use `npm` rather than `npm.cmd` on macOS/Linux. In a second terminal at the
+repository root, start the headless backend:
+
+```powershell
+& .\app\backend\.venv\Scripts\python.exe -m ai_job_search --frontend-port 5173
+```
+
+On macOS/Linux, use `app/backend/.venv/bin/python` instead of the Windows Python
+path. Open the **one-use login link printed by the backend**, pointing to
+`http://127.0.0.1:5173/#token=...`, within 90 seconds. No desktop launcher or
+initial built-frontend visit is needed.
 
 The development server binds to `127.0.0.1:5173` and proxies `/api` to the local
 backend at `http://127.0.0.1:8765`. `AI_JOB_SEARCH_API_URL` can select another
 **loopback-only** backend. The proxy rewrites Host and an explicitly matching
 local development Origin; foreign origins are left for the backend to reject.
-Session cookies, CSRF, and idempotency checks remain required. Open the
-launcher-issued bootstrap fragment on the development origin to connect.
+Session cookies, CSRF, and idempotency checks remain required. Keep `127.0.0.1`
+in both services and the browser; do not switch to `localhost`. Restart the
+backend for a fresh login link if it expired. Stop each service with Ctrl+C in
+its terminal. Closing the tab does not stop them.
 
-For normal use, build the app and let the local launcher/backend serve `dist`.
-The end user does not need Node, a development server, or terminal commands.
+Alternatively, build the app and run the backend **without** `--frontend-port`;
+it serves `dist` and prints its login link on port 8765. This needs only the
+backend process, not Vite. Node is then required only to install/build/update
+frontend assets.
 
 ```powershell
 npm run api:generate
@@ -39,14 +56,16 @@ profile/document fields; server calculations remain authoritative.
 
 Unit/component tests use isolated fetch fixtures. Playwright tests use local
 API fixtures and real PDF.js rendering, including its bundled worker. They
-start and stop their own loopback Vite server and require Microsoft Edge
-(`channel: msedge`). No live provider, job board, or candidate data is used.
+start and stop their own loopback Vite server. Windows uses Microsoft Edge
+(`channel: msedge`); macOS/Linux use Playwright Chromium, installed with
+`npx playwright install chromium` from this directory. No live provider,
+job board, or candidate data is used.
 
 ## Real FastAPI integration journey
 
 The separate integration test serves the **built** frontend from the real
 FastAPI application. It does not intercept or mock HTTP. It exercises the
-native, single-use launch-token artifact, cookie bootstrap/reload, real CSRF and
+single-use login-token artifact, cookie bootstrap/reload, real CSRF and
 idempotency enforcement, SQLite queue claims and approval checkpoints, canonical
 profile/job/archive/tracker writes, full evaluation, document editing and local
 PDF.js rendering, submission recording, outcomes, and reload persistence.
@@ -57,8 +76,8 @@ From `app\frontend`:
 npm run test:integration
 ```
 
-This requires `..\backend\.venv\Scripts\python.exe` with the backend's test
-dependencies installed, plus Microsoft Edge. The command builds first, starts
+This requires the backend virtual environment with its test dependencies,
+plus the browser described above. The command builds first, starts
 its own loopback server on an available port, runs one bounded journey, stops the
 server, and removes its uniquely named synthetic workspace/resource bundle.
 By default data lives under Playwright's test output; optionally set
@@ -80,7 +99,7 @@ results before cleanup. Existing HTTP-fixture browser tests are unchanged.
 
 ## Safety and interaction rules
 
-- A 401 shows “reopen from your app shortcut,” not an account-login form.
+- A 401 explains the backend-terminal login link, not an account-login form.
 - Every mutation has a fresh idempotency UUID and in-memory CSRF token;
   mutations are not automatically retried.
 - Imports, profile changes, rewrites, resets, and restores are reviewable

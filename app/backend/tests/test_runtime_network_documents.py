@@ -69,10 +69,14 @@ def test_minimal_process_environment_excludes_provider_credentials(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "synthetic-secret")
     monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "synthetic-token")
     monkeypatch.setenv("FREEHIRE_API_URL", "http://127.0.0.1")
+    monkeypatch.setenv("DBUS_SESSION_BUS_ADDRESS", "unix:path=/synthetic-session/bus")
+    monkeypatch.setenv("XDG_RUNTIME_DIR", "/synthetic-session")
     environment = minimal_environment()
     assert "ANTHROPIC_API_KEY" not in environment
     assert "CLAUDE_CODE_OAUTH_TOKEN" not in environment
     assert "FREEHIRE_API_URL" not in environment
+    assert environment["DBUS_SESSION_BUS_ADDRESS"] == "unix:path=/synthetic-session/bus"
+    assert environment["XDG_RUNTIME_DIR"] == "/synthetic-session"
 
 
 @pytest.mark.asyncio

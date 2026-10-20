@@ -61,7 +61,7 @@ export function ErrorPanel({ error, retry }: { error: unknown; retry?: () => voi
     <p>{message}</p>
     {revisionConflict && <p>Your files changed since this screen was opened.
       Refresh the latest version and review it before saving again. Your edits have not been overwritten.</p>}
-    {apiError?.status === 403 && <p>Reopen the app from its shortcut if your local session has expired.</p>}
+    {apiError?.status === 403 && <p>Refresh this page. If your session expired, use a fresh login link from the backend terminal.</p>}
     {apiError?.detail != null && <details><summary>Technical details</summary>
       <pre className="plain-text">{typeof apiError.detail === 'string'
         ? apiError.detail : JSON.stringify(apiError.detail, null, 2)}</pre></details>}

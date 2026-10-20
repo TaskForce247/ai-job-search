@@ -5,19 +5,20 @@ import { DependencyStatus, PortalControls, WorkspaceControls } from '../componen
 import { fetchFixtures, renderApp } from './helpers';
 
 describe('guided local setup and source permissions', () => {
-  it('uses only an OS-approved directory grant and asks before switching', async () => {
+  it('asks for a full workspace path and requires approval before switching', async () => {
     const user = userEvent.setup();
     const fetch = fetchFixtures({
       '/api/v1/workspace': (init: RequestInit | undefined) => {
         if (init?.method === 'POST') {
-          expect(JSON.parse(String(init.body))).toEqual({ grant: 'approved-grant', create: true });
+          expect(JSON.parse(String(init.body))).toEqual({ path: 'C:\\Private\\Careers', create: true });
         }
         return new Response(JSON.stringify({ path: 'C:\\Private\\Careers', initialized: true, revision: 'w1', public_repository_warning: false }));
       },
-      '/api/v1/workspace/pick': { grant: 'approved-grant', display_path: 'C:\\Private\\Careers' },
     });
     renderApp(<WorkspaceControls />);
     await screen.findByText('Workspace ready');
+    expect(screen.getByRole('button', { name: 'Choose a new workspace folder' })).toBeDisabled();
+    await user.type(screen.getByLabelText('Workspace folder path'), 'C:\\Private\\Careers');
     await user.click(screen.getByRole('button', { name: 'Choose a new workspace folder' }));
     await user.click(await screen.findByRole('button', { name: 'Create here' }));
     const dialog = screen.getByRole('dialog', { name: 'Create this workspace?' });
@@ -93,20 +94,21 @@ describe('guided local setup and source permissions', () => {
     await waitFor(() => expect(fetch.mock.calls.some(([url]) => url === '/api/v1/system/dependencies/tex/repair')).toBe(true));
   });
 
-  it('leaves the workspace unchanged when the native picker is cancelled', async () => {
+  it('leaves the workspace unchanged when a typed folder selection is cancelled', async () => {
     const user = userEvent.setup();
     const fetch = fetchFixtures({
       '/api/v1/workspace': { path: 'C:\\Private\\Current', initialized: false, revision: 'w1', public_repository_warning: false },
-      '/api/v1/workspace/pick': { cancelled: true, grant: '', display_path: '' },
     });
     renderApp(<WorkspaceControls />);
+    await user.type(await screen.findByLabelText('Workspace folder path'), 'C:\\Private\\Other');
     await user.click(await screen.findByRole('button', { name: 'Choose an existing workspace' }));
+    await user.click(screen.getByRole('button', { name: 'Cancel selection' }));
     expect(await screen.findByText('Folder selection cancelled. Your workspace is unchanged.')).toBeVisible();
     expect(screen.queryByRole('button', { name: 'Use this folder' })).not.toBeInTheDocument();
     expect(fetch.mock.calls.some((call) => call[0] === '/api/v1/workspace' && call[1]?.method === 'POST')).toBe(false);
   });
 
-  it('inspects the current workspace without reusing a consumed directory grant', async () => {
+  it('inspects only the current workspace without a desktop folder picker', async () => {
     const user = userEvent.setup();
     const fetch = fetchFixtures({
       '/api/v1/workspace': { path: 'C:\\Private\\Current', initialized: true, revision: 'w1', public_repository_warning: false },

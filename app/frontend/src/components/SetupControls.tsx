@@ -4,7 +4,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { api } from '../api';
 import { useAction, useApiQuery, useNotices } from '../query';
-import type { ApiSchema, Dependency, Portal, Readiness, RunAccepted, Settings, SettingsView, Workspace, WorkspaceGrant } from '../types';
+import type { ApiSchema, Dependency, Portal, Readiness, RunAccepted, Settings, SettingsView, Workspace } from '../types';
 import { Alert, ApprovalLink, Badge, Button, ErrorPanel, ExternalLink, Field, Loading, Modal, Panel } from './ui';
 import { StructuredDetails } from './proposals';
 
@@ -79,7 +79,7 @@ export function DependencyStatus({ compact = false }: { compact?: boolean }) {
   if (query.error) return <ErrorPanel error={query.error} retry={() => void query.refetch()} />;
   if (!query.data) return null;
   return <div className="stack">
-    {!compact && <p className="hint">The app checks and manages its own tools. You never need to enter a terminal command.</p>}
+    {!compact && <p className="hint">Install local tools using the application README. Guided repair is available where supported.</p>}
     <div className="dependency-list">{query.data.dependencies.map((dependency) =>
       <div key={dependency.id} className="dependency-row">
         <div><div className="actions"><strong>{dependency.label}</strong><Badge value={dependency.status} /></div>
@@ -110,23 +110,19 @@ export function DependencyStatus({ compact = false }: { compact?: boolean }) {
 export function WorkspaceControls() {
   const query = useApiQuery<Workspace>(['workspace'], '/workspace');
   const client = useQueryClient();
-  const [selected, setSelected] = useState<(WorkspaceGrant & { create: boolean }) | null>(null);
+  const [path, setPath] = useState('');
+  const [selected, setSelected] = useState<ApiSchema<'WorkspaceInput'> | null>(null);
   const [inspectOpen, setInspectOpen] = useState(false);
   const [confirmed, setConfirmed] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const { notify, queued } = useNotices();
-  const pick = useAction((_create: boolean) => api<WorkspaceGrant>('/workspace/pick', { method: 'POST', body: {} }),
-    (grant, create) => {
-      if (grant.cancelled || !grant.grant) { setSelected(null); notify('Folder selection cancelled. Your workspace is unchanged.'); return; }
-      setSelected({ ...grant, create }); setConfirmed(false);
-    });
-  const change = useAction((selection: WorkspaceGrant & { create: boolean }) =>
-    api<Workspace>('/workspace', { method: 'POST', body: { grant: selection.grant, create: selection.create } satisfies ApiSchema<'WorkspaceInput'> }),
+  const change = useAction((selection: ApiSchema<'WorkspaceInput'>) =>
+    api<Workspace>('/workspace', { method: 'POST', body: selection }),
   async (_workspace, selection) => {
     await client.cancelQueries();
     await client.resetQueries();
     setInspectOpen(!selection.create);
-    setSelected(null); setConfirmOpen(false);
+    setPath(''); setSelected(null); setConfirmOpen(false);
     notify(selection.create ? 'Local workspace created.' : 'Workspace selected. Inspect existing files to review a proposed import.');
   });
   const importFiles = useAction(() => api<RunAccepted>('/workspace/imports', { method: 'POST', body: {} }),
@@ -143,18 +139,22 @@ export function WorkspaceControls() {
     </Alert>}
     <p>Your workspace contains career information and document history. Choose a private folder you control.
       Existing files are inspected and proposed changes require approval.</p>
+    <Field id="workspace-path" label="Workspace folder path" hint="Enter the full absolute path on this computer. A new workspace needs an empty folder.">
+      <input id="workspace-path" value={path} maxLength={4096} aria-describedby="workspace-path-hint"
+        onChange={(event) => { setPath(event.target.value); setSelected(null); }} />
+    </Field>
     <div className="actions">
-      <Button variant="secondary" busy={pick.isPending} disabled={change.isPending}
-        onClick={() => pick.mutate(true)}>Choose a new workspace folder</Button>
-      <Button variant="secondary" busy={pick.isPending} disabled={change.isPending}
-        onClick={() => pick.mutate(false)}>Choose an existing workspace</Button>
+      <Button variant="secondary" disabled={!path.trim() || change.isPending}
+        onClick={() => { setSelected({ path, create: true }); setConfirmed(false); }}>Choose a new workspace folder</Button>
+      <Button variant="secondary" disabled={!path.trim() || change.isPending}
+        onClick={() => { setSelected({ path, create: false }); setConfirmed(false); }}>Choose an existing workspace</Button>
     </div>
-    <ErrorPanel error={pick.error} /><ErrorPanel error={change.error} />
+    <ErrorPanel error={change.error} />
     {selected && <div className="selected-folder"><p className="eyebrow">{selected.create ? 'New workspace' : 'Existing workspace'}</p>
-      <p className="path-display">{selected.display_path}</p>
+      <p className="path-display">{selected.path}</p>
       <div className="actions"><Button onClick={() => setConfirmOpen(true)}>
         {selected.create ? 'Create here' : 'Use this folder'}</Button>
-        <Button variant="ghost" onClick={() => setSelected(null)}>Cancel selection</Button></div>
+        <Button variant="ghost" onClick={() => { setSelected(null); notify('Folder selection cancelled. Your workspace is unchanged.'); }}>Cancel selection</Button></div>
     </div>}
     {query.data?.path && <details open={inspectOpen} onToggle={(event) => setInspectOpen(event.currentTarget.open)}>
       <summary>Import existing records from this workspace</summary>
@@ -166,7 +166,7 @@ export function WorkspaceControls() {
     </details>}
     <Modal open={confirmOpen} title={selected?.create ? 'Create this workspace?' : 'Switch to this workspace?'}
       onClose={() => { if (!change.isPending) setConfirmOpen(false); }}>
-      <p className="path-display">{selected?.display_path}</p>
+      <p className="path-display">{selected?.path}</p>
       <p>Unsaved edits on other screens are not moved to the selected workspace.
         Existing records are never silently overwritten. Active operations may prevent switching.</p>
       <label className="checkbox-row"><input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} />

@@ -7,11 +7,6 @@ on:
   pull_request:
     paths: ["app/**", "tools/**", ".claude/**", ".agents/**", "cv/**", "cover_letters/**", "documents/README.md", ".github/workflows/local-app.yml"]
   workflow_dispatch:
-    inputs:
-      build_portable:
-        description: Build and smoke-check the optional Windows x64 portable package
-        type: boolean
-        default: false
 
 permissions:
   contents: read
@@ -39,10 +34,9 @@ jobs:
           & app\backend\.venv\Scripts\python.exe -m pip install --quiet -c app\backend\constraints.txt -e ".\app\backend[dev]"
       - name: Install declared frontend dependencies
         run: npm.cmd --prefix app\frontend ci --no-fund --no-audit
-      - name: Verify reviewed package resources and lint
+      - name: Lint backend
         run: |
-          & app\backend\.venv\Scripts\python.exe app\packaging\bundle_resources.py &&
-          & app\backend\.venv\Scripts\python.exe -m ruff check app\backend\src app\backend\tests app\backend\export_openapi.py app\packaging\bundle_resources.py app\packaging\local-app.spec
+          & app\backend\.venv\Scripts\python.exe -m ruff check app\backend\src app\backend\tests app\backend\export_openapi.py
       - name: Check API schema generation
         run: |
           & app\backend\.venv\Scripts\python.exe app\backend\export_openapi.py &&
@@ -56,8 +50,5 @@ jobs:
         run: npm.cmd --prefix app\frontend run test:e2e
       - name: Real FastAPI browser journey
         run: npm.cmd --prefix app\frontend run test:integration
-      - name: Source launch and bundled runtime smoke
+      - name: Headless server and runtime smoke
         run: '& app\backend\.venv\Scripts\python.exe -m ai_job_search --smoke-test --smoke-report "$env:RUNNER_TEMP\ai-job-search-source-smoke.json"'
-      - name: Optional portable build and frozen-runtime smoke
-        if: github.event_name == 'workflow_dispatch' && inputs.build_portable
-        run: '& app\packaging\build.ps1 -SkipFrontend'

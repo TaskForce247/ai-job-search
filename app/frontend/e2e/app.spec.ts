@@ -137,7 +137,7 @@ async function installApi(page: Page, onboardingComplete = true) {
   return { errors, intentKeys };
 }
 
-test('guided first run and responsive navigation do not require a terminal or login', async ({ page }, testInfo) => {
+test('guided first run and responsive navigation do not require AI commands or an account', async ({ page }, testInfo) => {
   const { errors } = await installApi(page, false);
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/');

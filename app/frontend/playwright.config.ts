@@ -10,7 +10,7 @@ export default defineConfig({
   reporter: 'list',
   use: {
     baseURL: 'http://127.0.0.1:5174',
-    channel: 'msedge',
+    channel: process.platform === 'win32' ? 'msedge' : undefined,
     headless: true,
     viewport: { width: 1440, height: 1000 },
     trace: 'retain-on-failure',

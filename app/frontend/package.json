@@ -9,7 +9,7 @@
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "test:integration": "npm run build && playwright test --config playwright.integration.config.ts",
-    "api:generate": "openapi-typescript ..\\backend\\openapi.json -o src\\api\\schema.d.ts",
+    "api:generate": "openapi-typescript ../backend/openapi.json -o src/api/schema.d.ts",
     "typecheck": "tsc --noEmit",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview --host 127.0.0.1"

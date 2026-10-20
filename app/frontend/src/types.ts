@@ -29,12 +29,6 @@ export interface Workspace {
   public_repository_warning: boolean | string;
 }
 
-export interface WorkspaceGrant {
-  grant: string;
-  display_path: string;
-  cancelled?: boolean;
-}
-
 export interface Dependency {
   id: string;
   label: string;

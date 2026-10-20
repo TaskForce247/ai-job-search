@@ -29,8 +29,9 @@ export const test = base.extend<{ integration: IntegrationLaunch }>({
     await mkdir(parent, { recursive: true });
     const directory = join(parent, `frontend-real-api-${randomUUID()}`);
     const port = process.env.AI_JOB_SEARCH_INTEGRATION_PORT ?? '0';
-    const python = resolve(frontend, '..\\backend\\.venv\\Scripts\\python.exe');
-    const child = spawn(python, ['-B', join(frontend, 'integration\\server.py'), '--data-dir', directory, '--port', port], {
+    const python = resolve(frontend, '..', 'backend', '.venv', process.platform === 'win32' ? 'Scripts' : 'bin',
+      process.platform === 'win32' ? 'python.exe' : 'python');
+    const child = spawn(python, ['-B', join(frontend, 'integration', 'server.py'), '--data-dir', directory, '--port', port], {
       cwd: frontend, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true,
       env: { ...process.env, PYTHONDONTWRITEBYTECODE: '1', PYTHONUNBUFFERED: '1' },
     });

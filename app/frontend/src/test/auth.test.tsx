@@ -6,10 +6,10 @@ import { ErrorPanel } from '../components/ui';
 import { fetchFixtures, json, renderApp } from './helpers';
 
 describe('authentication and actionable errors', () => {
-  it('shows shortcut guidance rather than an account login on a 401', async () => {
+  it('shows terminal login-link guidance rather than an account login on a 401', async () => {
     fetchFixtures({ '/api/v1/session': () => json({ error: { code: 'SESSION_REQUIRED', message: 'Unauthorized' } }, 401) });
     renderApp(<SessionGate><p>Private workspace</p></SessionGate>);
-    expect(await screen.findByRole('heading', { name: 'Reopen from your app shortcut.' })).toBeVisible();
+    expect(await screen.findByRole('heading', { name: 'Open the login link from your backend terminal.' })).toBeVisible();
     expect(screen.queryByText('Private workspace')).not.toBeInTheDocument();
     expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
   });
@@ -19,7 +19,7 @@ describe('authentication and actionable errors', () => {
     renderApp(<SessionGate><p>Private workspace</p></SessionGate>);
     expect(await screen.findByText('Private workspace')).toBeVisible();
     act(() => window.dispatchEvent(new CustomEvent('app:unauthorized')));
-    expect(screen.getByRole('heading', { name: 'Reopen from your app shortcut.' })).toBeVisible();
+    expect(screen.getByRole('heading', { name: 'Open the login link from your backend terminal.' })).toBeVisible();
     expect(screen.queryByText('Private workspace')).not.toBeInTheDocument();
   });
 
@@ -28,12 +28,12 @@ describe('authentication and actionable errors', () => {
     expect(screen.getByRole('alert')).toHaveTextContent('Your edits have not been overwritten');
     expect(screen.getByText('Reference: REVISION_CONFLICT')).toBeVisible();
     rerender(<ErrorPanel error={new ApiError(403, 'CSRF_INVALID', 'Permission denied.')} />);
-    expect(screen.getByRole('alert')).toHaveTextContent('Reopen the app from its shortcut');
+    expect(screen.getByRole('alert')).toHaveTextContent('fresh login link from the backend terminal');
   });
 
-  it('does not misdescribe a cancelled or expired folder grant as lost document edits', () => {
-    renderApp(<ErrorPanel error={new ApiError(409, 'directory_grant_expired', 'Choose the directory again using the native folder picker.')} />);
-    expect(screen.getByRole('alert')).toHaveTextContent('Choose the directory again');
+  it('does not misdescribe an unavailable workspace as lost document edits', () => {
+    renderApp(<ErrorPanel error={new ApiError(409, 'workspace_missing', 'The selected workspace no longer exists.')} />);
+    expect(screen.getByRole('alert')).toHaveTextContent('The selected workspace no longer exists');
     expect(screen.queryByText(/Your files changed since/)).not.toBeInTheDocument();
   });
 });

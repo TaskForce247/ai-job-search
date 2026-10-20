@@ -107,23 +107,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/workspace/pick": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Pick Workspace */
-        post: operations["pick_workspace_api_v1_workspace_pick_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/workspace/imports": {
         parameters: {
             query?: never;
@@ -616,23 +599,6 @@ export interface paths {
         get: operations["artifact_api_v1_artifacts__artifact_id__get"];
         put?: never;
         post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/artifacts/{artifact_id}/open-folder": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Open Artifact Folder */
-        post: operations["open_artifact_folder_api_v1_artifacts__artifact_id__open_folder_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1505,8 +1471,8 @@ export interface components {
         };
         /** WorkspaceInput */
         WorkspaceInput: {
-            /** Grant */
-            grant: string;
+            /** Path */
+            path: string;
             /**
              * Create
              * @default false
@@ -1699,26 +1665,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    pick_workspace_api_v1_workspace_pick_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
                 };
             };
         };
@@ -2743,37 +2689,6 @@ export interface operations {
         };
     };
     artifact_api_v1_artifacts__artifact_id__get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                artifact_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    open_artifact_folder_api_v1_artifacts__artifact_id__open_folder_post: {
         parameters: {
             query?: never;
             header?: never;

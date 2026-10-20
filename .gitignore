@@ -120,9 +120,10 @@ company_research/*.json
 # Brainstorm mockups (superpowers visual companion) - never ship
 .superpowers/
 
-# Local application state, build output, and packaging environments
+# Local application state and frontend build output
 .app/
 app/frontend/dist/
+app/frontend/public/pdfjs/
 app/frontend/coverage/
 app/frontend/playwright-report/
 app/frontend/test-results/
@@ -130,5 +131,3 @@ app/backend/*.egg-info/
 app/backend/src/*.egg-info/
 app/backend/.pytest_cache/
 app/backend/.ruff_cache/
-app/packaging/dist/
-app/packaging/work/

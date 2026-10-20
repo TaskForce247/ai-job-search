@@ -2,20 +2,18 @@ from __future__ import annotations
 
 import argparse
 import json
-import multiprocessing
-import queue
+import signal
 import socket
 import sys
 import threading
 import time
 import urllib.error
 import urllib.request
-import webbrowser
 from pathlib import Path
 
 import uvicorn
 
-from .api import NativeDialogs, create_app
+from .api import create_app
 from .config import Config, data_home
 from .errors import AppError
 
@@ -26,9 +24,12 @@ def selected_workspace() -> Path:
         return data_home() / "workspace"
     try:
         settings = json.loads(path.read_text(encoding="utf-8"))
-        return Path(settings["workspace"])
+        workspace = Path(settings["workspace"])
+        if not workspace.is_absolute():
+            raise ValueError("The saved workspace path must be absolute.")
+        return workspace
     except (ValueError, KeyError, TypeError) as exc:
-        raise AppError("invalid_launcher_settings", "The saved workspace selection is damaged. Preserve your workspace and repair the launcher settings.") from exc
+        raise AppError("invalid_workspace_settings", "The saved workspace selection is damaged. Preserve your workspace and use --workspace to select it explicitly.") from exc
 
 
 def available_socket(port: int) -> socket.socket:
@@ -43,25 +44,15 @@ def available_socket(port: int) -> socket.socket:
     return listener
 
 
-class DialogBridge(NativeDialogs):
-    def __init__(self):
-        self.requests: queue.Queue = queue.Queue()
-
-    def choose_directory(self) -> Path | None:
-        result: queue.Queue = queue.Queue(maxsize=1)
-        self.requests.put(result)
-        try:
-            value = result.get(timeout=600)
-        except queue.Empty as exc:
-            raise AppError("directory_dialog_timeout", "The folder picker timed out. Open it again.", 409) from exc
-        return Path(value) if value else None
-
-
-def start_server(config: Config, dialogs: NativeDialogs | None = None, on_shutdown=None):
+def start_server(config: Config):
     listener = available_socket(int(config.origin.rsplit(":", 1)[1]))
     config.origin = f"http://127.0.0.1:{listener.getsockname()[1]}"
+
+    def shutdown() -> None:
+        server.should_exit = True
+
     try:
-        app = create_app(config, dialogs=dialogs, on_shutdown=on_shutdown)
+        app = create_app(config, on_shutdown=shutdown)
     except BaseException:
         listener.close()
         raise
@@ -122,7 +113,7 @@ def smoke_test(config: Config) -> dict:
                 with httpx.Client(base_url=config.origin, trust_env=False, timeout=10) as client:
                     response = client.get("/")
                     if response.status_code != 200 or 'id="root"' not in response.text:
-                        raise AppError("ui_not_bundled", "The built interface was not included in this package.")
+                        raise AppError("frontend_missing", "Build the frontend before running this smoke check.")
                     startup_seconds = round(time.monotonic() - started, 3)
                     response = client.post("/api/v1/session/bootstrap", json={"token": app.state.sessions.mint()},
                                            headers={"Origin": config.origin})
@@ -131,13 +122,13 @@ def smoke_test(config: Config) -> dict:
                         raise AppError("bootstrap_failed", "The local session handshake failed.")
                     client.headers.update({
                         "Origin": config.origin, "X-CSRF-Token": response.json()["csrf_token"],
-                        "Idempotency-Key": "local-package-smoke",
+                        "Idempotency-Key": "local-server-smoke",
                     })
                     response = client.get("/api/v1/profile")
                     response.raise_for_status()
                     profile = response.json()
                     response = client.post("/api/v1/profile/changes", json={
-                        "profile": Profile(name="Synthetic Package Check").model_dump(mode="json"),
+                        "profile": Profile(name="Synthetic Server Check").model_dump(mode="json"),
                         "expected_revision": profile["revision"],
                     })
                     response.raise_for_status()
@@ -150,10 +141,10 @@ def smoke_test(config: Config) -> dict:
                         if run["status"] == "awaiting_user":
                             break
                         if run["status"] in ("failed", "interrupted", "cancelled"):
-                            raise AppError("packaged_worker_failed", run["error"] or "The worker did not preserve its approval.")
+                            raise AppError("worker_failed", run["error"] or "The worker did not preserve its approval.")
                         time.sleep(0.1)
                     else:
-                        raise AppError("packaged_worker_timeout", "The packaged worker did not complete its local checkpoint.")
+                        raise AppError("worker_timeout", "The worker did not complete its local checkpoint.")
                     if client.get("/api/v1/profile").json()["data"]["name"]:
                         raise AppError("approval_not_enforced", "An unapproved profile change was incorrectly saved.")
                     client.get("/api/v1/dashboard").raise_for_status()
@@ -164,7 +155,7 @@ def smoke_test(config: Config) -> dict:
                     writer.write(buffer)
                     pdf.write_bytes(buffer.getvalue())
                 if not DocumentService.render_pages(pdf)[0].startswith(b"\x89PNG"):
-                    raise AppError("pdf_renderer_unavailable", "The packaged PDF renderer did not produce a page image.")
+                    raise AppError("pdf_renderer_unavailable", "The PDF renderer did not produce a page image.")
                 native = Path(claude_agent_sdk.__file__).parent / "_bundled" / ("claude.exe" if sys.platform == "win32" else "claude")
                 sdk_version = command([str(native), "--version"], Path(directory), timeout=30).strip()
                 if keyring.get_keyring().priority <= 0:
@@ -185,11 +176,11 @@ def smoke_test(config: Config) -> dict:
 
 
 def main() -> None:
-    multiprocessing.freeze_support()
-    parser = argparse.ArgumentParser(description="Launch the local AI Job Search interface.")
-    parser.add_argument("--workspace", type=Path, help="Developer override for the writable workspace.")
-    parser.add_argument("--port", type=int, default=0, help="Developer override; zero chooses an available loopback port.")
-    parser.add_argument("--smoke-test", action="store_true", help="Check the packaged UI and handshake without opening a window.")
+    parser = argparse.ArgumentParser(description="Run the local AI Job Search backend without a desktop launcher.")
+    parser.add_argument("--workspace", type=Path, help="Use this local workspace instead of the saved selection.")
+    parser.add_argument("--port", type=int, default=8765, help="Loopback backend port (default: 8765; zero chooses an available port).")
+    parser.add_argument("--frontend-port", type=int, help="Print the login link for a separately running Vite frontend, usually 5173.")
+    parser.add_argument("--smoke-test", action="store_true", help="Check the built UI, server, worker, and local runtimes without paid AI.")
     parser.add_argument("--smoke-report", type=Path, help="Write local diagnostic evidence for --smoke-test.")
     args = parser.parse_args()
     if args.smoke_test:
@@ -209,116 +200,44 @@ def main() -> None:
         return
     if args.smoke_report:
         parser.error("--smoke-report requires --smoke-test")
-    import tkinter as tk
-    from tkinter import filedialog, messagebox, ttk
+    if not 0 <= args.port <= 65535:
+        parser.error("--port must be between 0 and 65535")
+    if args.frontend_port is not None and not 1 <= args.frontend_port <= 65535:
+        parser.error("--frontend-port must be between 1 and 65535")
+    try:
+        config = Config(workspace=args.workspace or selected_workspace(), origin=f"http://127.0.0.1:{args.port}")
+        app, server, thread, listener = start_server(config)
+    except AppError as exc:
+        parser.exit(1, f"Backend startup failed [{exc.code}]: {exc.message}\n")
+    except OSError as exc:
+        parser.exit(1, f"Backend startup failed: {exc}. Check the port and workspace permissions.\n")
 
-    root = tk.Tk()
-    root.title("AI Job Search")
-    root.geometry("430x250")
-    root.resizable(False, False)
-    style = ttk.Style(root)
-    style.theme_use("clam")
-    style.configure("TFrame", background="#f4f6f2")
-    style.configure("TLabel", background="#f4f6f2", foreground="#18392e", font=("Segoe UI", 10))
-    style.configure("Title.TLabel", font=("Segoe UI", 19, "bold"))
-    frame = ttk.Frame(root, padding=24)
-    frame.pack(fill="both", expand=True)
-    ttk.Label(frame, text="AI Job Search", style="Title.TLabel").pack(anchor="w")
-    status = tk.StringVar(value="Starting your private local workspace...")
-    ttk.Label(frame, textvariable=status, wraplength=380).pack(anchor="w", pady=(12, 18))
-    bridge = DialogBridge()
-    shutdown = threading.Event()
-    startup_done = threading.Event()
-    messages: queue.Queue = queue.Queue()
-    running: dict = {}
+    def stop(signum=None, frame=None) -> None:
+        app.state.stopping = True
+        server.should_exit = True
 
-    def quit_app() -> None:
-        if shutdown.is_set():
-            return
-        app = running.get("app")
-        if app:
-            with app.state.workspace.store.connect() as connection:
-                count = connection.execute("SELECT COUNT(*) FROM runs WHERE status IN ('queued','running')").fetchone()[0]
-            if count and not messagebox.askokcancel(
-                "Stop active work?",
-                "Work is still active. Quitting stops owned processes and preserves saved checkpoints. An interrupted AI call may still incur API charges.",
-                parent=root,
-            ):
-                return
-        shutdown.set()
-        if app:
-            app.state.stopping = True
-        status.set("Saving checkpoints and stopping...")
-        button_reopen.configure(state="disabled")
-        button_quit.configure(state="disabled")
-
-        def finish() -> None:
-            startup_done.wait()
-            server = running.get("server")
-            if server:
-                running["app"].state.stopping = True
-                server.should_exit = True
-                running["thread"].join(timeout=15)
-                if running["thread"].is_alive():
-                    messages.put(("shutdown_failed", "Shutdown has not finished. Keep this window open and try Quit again; saved files were retained."))
-                    return
-                running["listener"].close()
-            messages.put(("stopped", None))
-        threading.Thread(target=finish, daemon=False, name="local-shutdown").start()
-
-    def reopen() -> None:
-        app = running.get("app")
-        if not app:
-            return
-        token = app.state.sessions.mint()
-        if not webbrowser.open(running["config"].origin + "/#token=" + token):
-            messagebox.showerror("Browser unavailable", "Your default browser could not be opened. Set a default browser in Windows Settings and try Reopen.", parent=root)
-
-    button_reopen = ttk.Button(frame, text="Reopen interface", command=reopen, state="disabled")
-    button_reopen.pack(fill="x", pady=3)
-    button_quit = ttk.Button(frame, text="Quit", command=quit_app)
-    button_quit.pack(fill="x", pady=3)
-    root.protocol("WM_DELETE_WINDOW", quit_app)
-
-    def handle_dialogs() -> None:
-        while not messages.empty():
-            kind, value = messages.get_nowait()
-            if kind == "stopped":
-                root.destroy()
-                return
-            if kind == "shutdown_failed":
-                shutdown.clear()
-                status.set(value)
-                button_quit.configure(state="normal")
-                messagebox.showerror("AI Job Search is still stopping", value, parent=root)
-            elif kind == "quit":
-                quit_app()
-            elif kind == "ready" and not shutdown.is_set():
-                status.set("Running only on this computer. Closing your browser does not stop work; use this window to reopen or quit.")
-                button_reopen.configure(state="normal")
-                reopen()
-            elif kind == "error" and not shutdown.is_set():
-                status.set("Startup failed. Your career files were not intentionally removed.")
-                messagebox.showerror("AI Job Search could not start", value, parent=root)
-        try:
-            result = bridge.requests.get_nowait()
-        except queue.Empty:
-            pass
-        else:
-            result.put("" if shutdown.is_set() else filedialog.askdirectory(parent=root, title="Choose a local workspace folder", mustexist=False))
-        root.after(100, handle_dialogs)
-
-    def startup() -> None:
-        try:
-            config = Config(workspace=args.workspace or selected_workspace(), origin=f"http://127.0.0.1:{args.port}")
-            app, server, thread, listener = start_server(config, bridge, lambda: messages.put(("quit", None)))
-            running.update(app=app, server=server, thread=thread, listener=listener, config=config)
-            messages.put(("ready", None))
-        except Exception as exc:
-            message = exc.message if isinstance(exc, AppError) else "The application could not start. Check that the installation and workspace are on a writable local disk."
-            messages.put(("error", message))
-        finally:
-            startup_done.set()
-    root.after(100, handle_dialogs)
-    threading.Thread(target=startup, daemon=False, name="local-startup").start()
-    root.mainloop()
+    handlers = {}
+    try:
+        for name in ("SIGTERM", "SIGBREAK"):
+            sig = getattr(signal, name, None)
+            if sig is not None:
+                handlers[sig] = signal.signal(sig, stop)
+        frontend = f"http://127.0.0.1:{args.frontend_port}" if args.frontend_port else config.origin
+        print(f"Backend ready: {config.origin}\nWorkspace: {app.state.workspace.root}", flush=True)
+        print(f"Open this one-use link within 90 seconds:\n{frontend}/#token={app.state.sessions.mint()}", flush=True)
+        print("Keep this terminal open. Press Ctrl+C to stop the backend.\n"
+              "If the login link expires, restart the backend for a fresh link.", flush=True)
+        while thread.is_alive():
+            thread.join(timeout=0.5)
+        if not server.should_exit:
+            parser.exit(1, "The backend stopped unexpectedly. Review the terminal diagnostics before restarting.\n")
+    except KeyboardInterrupt:
+        pass
+    finally:
+        stop()
+        thread.join(timeout=15)
+        listener.close()
+        for sig, handler in handlers.items():
+            signal.signal(sig, handler)
+        if thread.is_alive():
+            parser.exit(1, "Backend shutdown has not finished. Saved checkpoints were retained.\n")

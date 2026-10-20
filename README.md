@@ -64,13 +64,16 @@ The framework encodes career guidance best practices, including structured evalu
 A local, single-user browser interface is available as a **development preview**
 in [`app`](app/README.md): guided profile setup, job search/import, assessments and
 approvals, CV/cover-letter editing with PDF previews, application tracking, and
-backup/restore. It runs on your own computer, not a hosted website. The optional
-Windows launcher only opens and manages the local website.
+backup/restore. It runs on your own computer, not a hosted website. Start the
+Python backend and React frontend from terminals; no Windows desktop app or
+Docker is required.
 
 The browser app uses an Anthropic API key stored in the OS credential store;
-ordinary users do not operate Claude Code or another CLI. API billing and cloud
+users do not operate an AI CLI or write AI prompts to navigate it. Basic terminal
+setup with Python and Node.js is expected. API billing and cloud
 data-sharing consent are separate from a Claude subscription. See the
-[application guide](app/README.md) for building/running the preview and the
+[application guide](app/README.md) for separate backend/frontend startup on
+Windows, macOS, and Linux, a one-server built-frontend option, and the
 remaining live-provider, document-toolchain, clean-machine, and usability release
 checks. The original CLI workflow below remains supported.
 

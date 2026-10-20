@@ -1,233 +1,259 @@
-# Local browser application
+# Run the local browser app
 
-AI Job Search now has a **single-user website that runs on your own computer**.
-React supplies the interface; a loopback-only FastAPI service manages your local
-workspace and background work. The small Windows launcher only starts the website,
-opens your browser, and provides Reopen and Quit controls. It is not a separate
-Windows-native job-search interface, hosted service, or account system.
+AI Job Search is a **single-user website running on your computer**: a Python
+FastAPI backend and a React frontend. Start them from terminals, then use the
+browser for your job search. No Windows desktop app, Docker, or interactive AI
+CLI is required.
 
-**Status: development preview.** Deterministic browser journeys use the real local
-backend. A passing fixture journey is not evidence of live Claude, real LaTeX,
-clean-machine installation, or completed novice-usability acceptance. The release
-checks below distinguish these.
+**Status: development preview.** Source startup is documented for Windows,
+macOS, and Linux. Automated verification has been performed on Windows; the
+other operating systems still need real-environment acceptance.
 
-## Use the website
+## Prerequisites
 
-With a built Windows x64 portable package, extract the **entire** `AIJobSearch`
-folder to a local disk and double-click `AIJobSearch.exe`. Do not separate it from
-`_internal`. Normal use needs no Python, Node, terminal, or always-on service.
-This repository does not yet publish a signed installer; developers can build the
-portable folder using the instructions below.
+- A checkout or extracted copy of this repository.
+- **Python 3.12** with `venv` and `pip`.
+- **Node.js 22.12 or a newer compatible Node 22**, including npm.
+- A modern browser.
+- An unlocked operating-system credential store for AI: Windows Credential
+  Manager, macOS Keychain, or a Linux Secret Service keyring in your desktop
+  login session. Plaintext credential backends are rejected.
 
-Follow the browser's guided setup:
+You do not need to install or operate Claude Code separately. The backend's
+Claude Agent SDK dependency supplies its runtime. AI features require an
+Anthropic API key, entered **in the browser Settings**, and explicit cloud
+processing consent. API billing is separate from a Claude subscription.
 
-1. Use the private default workspace or select an existing framework workspace.
-   Importing existing records presents a migration proposal rather than silently
-   rewriting their identity links.
-2. Build your profile or import a text PDF/Markdown/text CV. Check uncertain facts
-   and approve the proposal. Scanned/image-only PDFs need conversion first.
-3. In Settings, enter an Anthropic API key and explicitly consent to cloud
-   processing. API billing is separate from a Claude subscription. Selected
-   profile evidence, posting text, drafts, and rendered document pages can be sent
-   to Anthropic when you request AI assistance. There is no subscription-login
-   integration and no automatic paid call on startup.
-4. Use Settings' guided dependency setup when needed. Bun runs the bundled
-   Freehire and opt-in LinkedIn adapters. MiKTeX, the stock-template packages, and
-   Poppler support verified PDFs. Setup requires confirmation, can download large
-   files, and accepts the displayed provider/source agreements only after consent.
-   Repair remains available for missing MiKTeX packages even when its compilers
-   are already detected.
-5. Search an available source or paste the **complete** job description. Pasted
-   postings do not require any portal runtime. Read the assessment and explicitly
-   choose whether to prepare documents.
-6. Review and edit the CV and cover letter. An edit makes the previous PDF/checks
-   stale until recompilation. A skipped or failed check is not a passing document.
-7. Submit through the employer's own site, then record the real submission date.
-   Preparation is not submission. Submitted document revisions are immutable;
-   later edits or outcomes do not rewrite what was sent.
+Bun and document tools are optional for initial startup; see
+[Job search and PDF tools](#job-search-and-pdf-tools).
 
-Activity preserves decisions, progress, cancellation, retryable interruptions, and
-local artifacts across refreshes. Live events replay by sequence; bounded polling
-continues with a visible explanation if streaming is unavailable. Closing a tab
-does not stop work. Quit from Settings or the launcher to stop the local service.
+## 1. Install dependencies once
 
-## Data and supported scope
+Open a terminal in the **repository root**. There is no need to activate the
+virtual environment when using the explicit Python paths below.
 
-The default workspace is `%LOCALAPPDATA%\AIJobSearch\workspace`; its selection is
-saved beside it in `workspace.json`. Keep it outside a public Git checkout.
-Canonical Markdown, JSON, CSV, LaTeX, and PDFs remain authoritative. `.app` contains
-operational SQLite, durable approvals/events, snapshots, preparation artifacts, and
-publication/recovery journals. It is not a replacement hosted database.
-
-API keys use Windows Credential Manager, not browser storage or workspace files.
-Backup exports exclude credentials. Backups still contain career information:
-choose an optional passphrase of at least 12 characters for encryption, and retain
-it yourself. Restore previews changes and requires `RESTORE`; reset requires
-`RESET`. Both create a safety backup before approved destructive changes.
-Replacing/removing the application folder does not remove the separate workspace.
-
-Offline profile access, stored postings, tracking, and existing PDF previews do
-not need AI. Network access is necessary for searches, URL retrieval, downloads,
-and cloud assistance. There is no UI telemetry or third-party asset CDN.
-The local service protects sessions, origins, CSRF, and artifacts, but does not
-claim to defend against malware already running as your OS user.
-
-The preview includes guided onboarding/profile editing, search/import/ranking,
-full assessments and approvals, reviewed stock CV/cover-letter preparation,
-typed editing and PDF.js previews, submission/outcome tracking, dashboard,
-workspace migration, backup/restore/reset, and tool readiness/repair.
-
-The portable package includes Freehire and LinkedIn source adapters; LinkedIn
-requires a separate terms/access acknowledgement. The four optional Danish
-adapters remain available in a source checkout with their declared dependencies,
-but are not distributed or advertised as available in the portable package.
-Live portal availability is best-effort; a fetch failure is not proof of closure.
-
-Interview preparation UI, upskilling, Gmail/Notion, arbitrary custom templates,
-unreviewed portal execution, additional AI providers, macOS/Linux distribution,
-and automatic updates are not part of this preview. Existing CLI workflows remain
-in place. Unsupported personalized rubric/template changes stop with an
-explanation instead of silently substituting stock policy.
-
-## Developer setup
-
-Supported development/build target: Windows x64, Python 3.12, Node 22.12 or newer
-compatible Node 22, PowerShell 7, and Microsoft Edge for browser tests.
-Run from the repository root:
+### Windows PowerShell
 
 ```powershell
 python -m venv app\backend\.venv
-& app\backend\.venv\Scripts\python.exe -m pip install -c app\backend\constraints.txt -e ".\app\backend[dev]"
+& .\app\backend\.venv\Scripts\python.exe -m pip install -c .\app\backend\constraints.txt -e ".\app\backend"
 npm.cmd --prefix app\frontend ci --no-fund --no-audit
+```
+
+### macOS / Linux
+
+```bash
+python3.12 -m venv app/backend/.venv
+app/backend/.venv/bin/python -m pip install -c app/backend/constraints.txt -e ./app/backend
+npm --prefix app/frontend ci --no-fund --no-audit
+```
+
+Keep the checkout: it contains the canonical workflow specifications, templates,
+fonts, and portal adapters used by the editable backend installation.
+
+## 2. Start the frontend
+
+In **terminal 1**, from the repository root:
+
+Windows PowerShell:
+
+```powershell
+npm.cmd --prefix app\frontend run dev
+```
+
+macOS / Linux:
+
+```bash
+npm --prefix app/frontend run dev
+```
+
+Leave it running. Vite listens at **http://127.0.0.1:5173** and proxies API
+requests to the backend at **http://127.0.0.1:8765**.
+
+## 3. Start the backend
+
+In **terminal 2**, also from the repository root:
+
+Windows PowerShell:
+
+```powershell
+& .\app\backend\.venv\Scripts\python.exe -m ai_job_search --frontend-port 5173
+```
+
+macOS / Linux:
+
+```bash
+app/backend/.venv/bin/python -m ai_job_search --frontend-port 5173
+```
+
+The backend stays in this terminal; it does not open a desktop window. It binds
+only to `127.0.0.1:8765` and prints a browser link like:
+
+```text
+http://127.0.0.1:5173/#token=<one-use-login-token>
+```
+
+**Open the actual link printed in terminal 2 within 90 seconds.** Opening the
+bare frontend URL does not establish the initial session. The frontend removes
+the token from the URL and exchanges it for an HttpOnly local session cookie.
+Keep the link private; it is not an API key or application account.
+
+Start the frontend first so it is ready before the backend issues the link.
+Use **127.0.0.1**, not `localhost`, in both services and the browser: session
+cookies are host-specific. Reloading or reopening the plain frontend URL works
+in the same browser while the session remains valid.
+
+If the link expires, was already used in another browser, or the session expires,
+restart the backend and use its fresh link. Stopping interrupts active work and
+preserves saved checkpoints; an interrupted AI request may still incur charges.
+
+## Stop and restart
+
+- Press **Ctrl+C in the backend terminal** to stop its server and owned workers.
+  Settings also has a confirmed **Stop backend** action.
+- Press **Ctrl+C in the frontend terminal** to stop Vite.
+- Closing the browser alone stops neither service.
+- To resume, start the two services again and open the new terminal-issued link.
+  Your saved workspace is not deleted by stopping either service.
+
+## Alternative: one server with a built frontend
+
+For ordinary use without hot reload, build the frontend once, then run only
+the backend. Rebuild after changing frontend code.
+
+Windows PowerShell:
+
+```powershell
 npm.cmd --prefix app\frontend run build
-& app\backend\.venv\Scripts\python.exe -m ai_job_search
+& .\app\backend\.venv\Scripts\python.exe -m ai_job_search
 ```
 
-The source launcher opens the built browser UI on an available loopback port,
-using the same one-use bootstrap handshake as the package. It never binds a LAN
-interface. `--workspace <local-folder>` and `--port <port>` are developer overrides,
-not required setup for end users.
+macOS / Linux:
 
-For frontend hot reload, start the source launcher with `--port 8765`, then
-`npm.cmd --prefix app\frontend run dev`. The development proxy is loopback-only
-and keeps session/CSRF checks. See [frontend development](frontend/README.md) for
-the launch-token detail. Business policy still loads from `.claude`; do not add a
-second prompt tree to the frontend or backend.
-
-### Build the optional portable launcher
-
-```powershell
-& app\packaging\build.ps1
+```bash
+npm --prefix app/frontend run build
+app/backend/.venv/bin/python -m ai_job_search
 ```
 
-This verifies the reviewed resource manifest, builds the frontend, packages the
-Python backend/launcher with PyInstaller, exercises the **frozen** server/session/
-worker/PDF-renderer/credential-backend/SDK-runtime path without paid AI, then
-creates `app\packaging\dist\AIJobSearch-0.1.0-windows-x64.zip` and its SHA-256 file.
-`-SkipFrontend` reuses a frontend you have already built. Local evidence is saved
-as `app\packaging\work\packaged-smoke.json`.
+Open the backend's printed login link, now at **http://127.0.0.1:8765**. No Vite
+server is needed in this mode.
 
-Only explicitly allowlisted, hash-reviewed framework/template files enter the
-package. Modified candidate templates fail the build; personal trackers,
-applications, secrets, runtime state, and arbitrary workspace code are excluded.
-After a deliberate framework/template update, a maintainer must review that the
-resources are pristine and non-personal **before** running:
+## Workspace and first use
+
+The default workspace is separate from the code:
+
+| OS | Default location |
+|---|---|
+| Windows | `%LOCALAPPDATA%\AIJobSearch\workspace` |
+| macOS / Linux | `~/.local/share/AIJobSearch/workspace` |
+
+In the browser, follow guided setup to confirm your profile and preferences.
+To switch workspaces, enter a **full absolute folder path** in Setup or Settings
+and confirm the change. New workspaces require an empty folder. Existing records
+are inspected separately and changes require approval. There is no native folder
+picker.
+
+You can also select a workspace when starting the backend:
 
 ```powershell
-& app\backend\.venv\Scripts\python.exe app\packaging\bundle_resources.py --record-reviewed-templates
+& .\app\backend\.venv\Scripts\python.exe -m ai_job_search --frontend-port 5173 --workspace "C:\Users\YourName\JobSearch"
 ```
 
-Never use that command merely to bypass a personalized-template build failure.
-Dependency pins are in `pyproject.toml`, `constraints.txt`, and the frontend
-lockfile. The package retains unmodified SDK/native PDF libraries, Python/Tcl/Tk,
-font notices, and dependency licenses under `_internal\licenses`. Bun, MiKTeX,
-and Poppler are separately downloaded, not silently redistributed by the build.
-Review provider terms and redistribution requirements before publishing.
+On macOS/Linux, use the same `--workspace` option with an absolute local path,
+such as `"$HOME/JobSearch"`. A browser-selected workspace is remembered in
+`workspace.json` beside the default workspace; `--workspace` overrides that
+selection for the current launch. Never use a public checkout for personal data.
 
-## Verification
+Canonical Markdown, JSON, CSV, LaTeX, and PDFs remain the business records.
+`.app` contains private operational SQLite, approvals, events, artifacts, and
+publication/recovery journals. Backups exclude API keys but still contain career
+information; encryption is optional and the passphrase must be retained by you.
 
-From the repository root, with the environment and frontend dependencies installed:
+Profile access, stored postings, tracking, and existing PDF previews work without
+AI. Searches, URL imports, and cloud assistance need a network connection.
+Preparing documents never records submission: submit on the employer's website,
+then record the actual submission date. Submitted document revisions are frozen.
+
+## Job search and PDF tools
+
+| Capability | Additional dependencies |
+|---|---|
+| Paste a posting, edit your profile, track applications | None beyond the app prerequisites |
+| AI assessments and drafting | Anthropic API key, cloud consent, and spending limits in Settings |
+| Search Freehire / LinkedIn | [Bun](https://bun.sh/); LinkedIn also requires its explicit terms/access acknowledgement |
+| Compile stock CV and cover letter | LuaLaTeX and XeLaTeX from [MiKTeX](https://miktex.org/), [TeX Live](https://tug.org/texlive/), or [MacTeX](https://tug.org/mactex/) |
+| Full PDF layout verification | Poppler `pdftotext` and `pdfinfo` |
+
+Install tools on `PATH` **before starting the backend**, or restart it after
+installation. Stock templates need the packages listed in
+[minimal TeX setup](../SETUP.md#minimal-tex-install-tinytexbasictex), including
+`moderncv`, `fontawesome5`, `fontspec`, and `needspace`. Fonts for the cover
+letter are already in the repository. Compilation never enables shell escape
+or opens hidden package-install dialogs.
+
+Settings shows actual tool readiness. Existing consent-based Windows dependency
+repair is still available where supported; on macOS/Linux use the providers'
+installation instructions. Finding compiler executables is not proof that a
+document passed compilation or verification. Failed and skipped checks remain
+visible.
+
+Freehire and LinkedIn have zero runtime npm dependencies. Other bundled portal
+adapters need their declared dependencies installed and their source enabled;
+use the existing [portal setup](../README.md#2-install-job-search-tools).
+
+## Troubleshooting
+
+| Symptom | Action |
+|---|---|
+| Browser asks for a local session | Open the fresh login link from the backend terminal, not just the bare website URL |
+| `localhost` opens but authentication fails | Use `127.0.0.1` consistently |
+| Backend says its port is occupied | Stop your previous backend, or use `--port` and update the Vite proxy target with `AI_JOB_SEARCH_API_URL` |
+| Frontend port 5173 is occupied | Stop your previous Vite server, or use `run dev -- --port <port>` and the matching backend `--frontend-port` |
+| Backend says the UI is not built | Start Vite and use `--frontend-port 5173`, or build the frontend and omit that option |
+| AI settings report an unavailable credential store | Unlock your OS keyring; on Linux run from your desktop login session with a Secret Service provider |
+| A dependency remains missing | Check `PATH`, restart the backend, and refresh readiness in Settings |
+
+For a non-default backend port, set `AI_JOB_SEARCH_API_URL` in the frontend
+terminal **before** starting Vite. The proxy accepts loopback targets only.
+Do not run bare Uvicorn as a substitute for the documented backend command:
+the app entrypoint handles startup, the login token, workspace ownership, and
+graceful shutdown.
+
+## Development checks
+
+Install the backend's test tools with the same `pip install` command above,
+replacing `-e ".\app\backend"` with `-e ".\app\backend[dev]"` (or
+`-e './app/backend[dev]'` on macOS/Linux).
+
+From the repository root on Windows:
 
 ```powershell
-& app\backend\.venv\Scripts\python.exe -m ruff check app\backend\src app\backend\tests app\backend\export_openapi.py app\packaging\bundle_resources.py app\packaging\local-app.spec
-& app\backend\.venv\Scripts\python.exe -m pytest app\backend\tests -q
+& .\app\backend\.venv\Scripts\python.exe -m ruff check app\backend\src app\backend\tests app\backend\export_openapi.py
+& .\app\backend\.venv\Scripts\python.exe -m pytest app\backend\tests -q
 npm.cmd --prefix app\frontend test
 npm.cmd --prefix app\frontend run typecheck
 npm.cmd --prefix app\frontend run test:e2e
 npm.cmd --prefix app\frontend run test:integration
-& app\backend\.venv\Scripts\python.exe -m ai_job_search --smoke-test
+npm.cmd --prefix app\frontend run build
+& .\app\backend\.venv\Scripts\python.exe -m ai_job_search --smoke-test
 ```
 
-If the machine's shared pytest temp directory is inaccessible, add `--basetemp`
-pointing to a new, task-owned temporary directory; do not change other users'
-directory permissions.
-
-Unit/API/storage tests use synthetic data. Browser fixture tests exercise real
-PDF.js. The separate integration journey uses real FastAPI, HTTP security,
-SQLite/worker claims, approvals, canonical writes, editing, submission/outcomes,
-and reload persistence; only AI, credentials, and document compilation/checks are
-explicitly injected. It defaults to a unique child of Playwright test output.
-`AI_JOB_SEARCH_INTEGRATION_ROOT` can select a private artifact parent; no Copilot
-installation or session-specific path is required. No paid provider, OS credential
-write, employer, or live portal is contacted.
-
-Regenerate API declarations after endpoint/schema changes:
+For an inaccessible shared pytest temp directory, add `--basetemp` with a new
+task-owned temporary path; never change another user's permissions. Regenerate
+API declarations after schema changes:
 
 ```powershell
-& app\backend\.venv\Scripts\python.exe app\backend\export_openapi.py
+& .\app\backend\.venv\Scripts\python.exe app\backend\export_openapi.py
 npm.cmd --prefix app\frontend run api:generate
 ```
 
-The separate `Local browser application` workflow runs on Windows, without secrets.
-Keep the original framework checks as well:
+Backend and browser tests use synthetic data. The real FastAPI browser journey
+exercises sessions, queue claims, approvals, canonical writes, editing, and
+tracking; AI and compilation/checks are explicitly synthetic. See
+[frontend development](frontend/README.md) for test prerequisites. Keep the
+original framework's skills, security, version, and Python checks as well.
 
-```powershell
-& app\backend\.venv\Scripts\python.exe tools\lint_skills.py
-& app\backend\.venv\Scripts\python.exe tools\security_guards.py
-& app\backend\.venv\Scripts\python.exe tools\check_framework_version.py
-& app\backend\.venv\Scripts\python.exe -m unittest discover -s tests -t . -q
-```
-
-### Recorded preview verification
-
-The current Windows x64 preview passed 125 backend tests (one skipped), 61
-frontend tests, typechecking, two fixture browser journeys, and the separate real
-FastAPI browser journey. The existing framework completed 647 tests with 29
-skipped; its skills, security, and version guards passed. Generated API contracts
-were unchanged after regeneration.
-
-Both source and frozen launch checks passed, including the actual worker,
-approval pause, PDFium page rendering, OS credential-backend availability, native
-workspace monitor, bundled SDK executable, and shutdown. Measured startup was
-1.890 seconds from source and 2.109 seconds frozen. The 158.9 MiB portable ZIP's
-inventory and SHA-256 were checked. The pinned Bun download/checksum and both
-included adapters' help commands passed in isolated storage, without installing
-tools globally or making live job searches.
-
-With 10,000 synthetic jobs and 1,000 application archives containing two drafts
-each, 20 post-initial-read samples through the authenticated ASGI API measured
-p95 reads of 106 ms for jobs, 94 ms for applications, and 92 ms for the dashboard;
-queue acknowledgement was 205 ms. The initial application index took 4.6 seconds
-and its first notification reconciliation took 0.94 seconds: not every individual
-request was below 300 ms. These are measurements on this development machine,
-not clean-machine or reference-hardware certification.
-
-### Release checks that require a real environment
-
-Passing deterministic checks does **not** complete these specification gates:
-
-- Connect/test Claude through the local settings UI using your own locally stored
-  API key, cloud consent, and agreed spending limits. Do not put keys in tests,
-  source files, command history, or chat.
-- Approve and exercise the real MiKTeX/Poppler installation/repair path. Compile,
-  extract text from, and inspect the actual two-page CV and one-page cover letter.
-- Install/run the package on a clean supported Windows machine without developer
-  tools or a terminal; check native folder selection, browser reopen/quit, and
-  document dependency setup. An unsigned build is not a signed installer.
-- Measure the specified large-workspace latency and cancellation/recovery bounds
-  on the reference hardware; do not infer them from small fixtures.
-- Complete manual accessibility checks and the five-person novice usability test
-  in the [specification](../docs/local-app-technical-specification.md).
-
-Do not advertise release readiness or universal lossless legacy import until
-those checks have evidence.
+Passing these checks is not evidence of live paid Claude, real stock-template
+compilation/visual verification, clean macOS/Linux setup, accessibility, or
+completed usability acceptance. Those remain separate release checks in the
+[technical specification](../docs/local-app-technical-specification.md).

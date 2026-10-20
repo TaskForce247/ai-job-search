@@ -1,11 +1,16 @@
 from __future__ import annotations
 
 import ctypes
+import json
 import os
+import queue
+import re
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
+from urllib.parse import parse_qs, urlsplit
 from uuid import uuid4
 
 import httpx
@@ -13,10 +18,11 @@ import pytest
 
 from ai_job_search.config import Config
 from ai_job_search.errors import AppError
-from ai_job_search.launcher import available_socket, start_server
 from ai_job_search.models import Decision
 from ai_job_search.profile import ProfileService
 from ai_job_search.runtime import minimal_environment
+from ai_job_search.server import available_socket, selected_workspace, start_server
+from ai_job_search.server import main as server_main
 from ai_job_search.worker import WorkerManager
 from ai_job_search.workflows import WorkflowService
 from ai_job_search.workspace import Workspace
@@ -169,12 +175,109 @@ def test_live_http_bootstrap_event_replay_and_shutdown_with_an_open_stream(works
 
 def test_failed_startup_closes_its_reserved_socket(workspace, monkeypatch):
     listener = available_socket(0)
-    monkeypatch.setattr("ai_job_search.launcher.available_socket", lambda port: listener)
+    monkeypatch.setattr("ai_job_search.server.available_socket", lambda port: listener)
 
     def fail(*args, **kwargs):
         raise AppError("fixture_failure", "Expected startup failure.")
 
-    monkeypatch.setattr("ai_job_search.launcher.create_app", fail)
+    monkeypatch.setattr("ai_job_search.server.create_app", fail)
     with pytest.raises(AppError, match="Expected startup failure"):
         start_server(Config(workspace=workspace.root))
     assert listener.fileno() == -1
+
+
+@pytest.mark.parametrize("frontend_port", [None, 5173])
+def test_terminal_entrypoint_prints_a_working_one_use_link_and_stops_cleanly(workspace, frontend_port):
+    arguments = [sys.executable, "-u", "-m", "ai_job_search", "--workspace", str(workspace.root), "--port", "0"]
+    if frontend_port is not None:
+        arguments.extend(["--frontend-port", str(frontend_port)])
+    process = subprocess.Popen(arguments, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                               text=True, encoding="utf-8", env={**os.environ, "PYTHONIOENCODING": "utf-8"})
+    lines = queue.Queue()
+
+    def read_output():
+        for line in process.stdout:
+            lines.put(line.strip())
+
+    reader = threading.Thread(target=read_output, daemon=True)
+    reader.start()
+    details = {}
+
+    def launched():
+        while not lines.empty():
+            line = lines.get_nowait()
+            if line.startswith("Backend ready: "):
+                details["origin"] = line.removeprefix("Backend ready: ")
+            if re.fullmatch(r"http://127\.0\.0\.1:\d+/#token=[\w-]+", line):
+                details["url"] = line
+        if process.poll() is not None:
+            raise AssertionError("The terminal backend stopped before printing its login link.")
+        return details if "origin" in details and "url" in details else None
+
+    try:
+        wait_until(launched)
+        parsed = urlsplit(details["url"])
+        assert parsed.hostname == "127.0.0.1"
+        assert parsed.port == (frontend_port or urlsplit(details["origin"]).port)
+        token = parse_qs(parsed.fragment)["token"][0]
+        with httpx.Client(base_url=details["origin"], trust_env=False, timeout=10) as client:
+            assert client.get("/api/v1/profile").status_code == 401
+            response = client.post("/api/v1/session/bootstrap", json={"token": token},
+                                   headers={"Origin": details["origin"]})
+            assert response.status_code == 200
+            assert client.get("/api/v1/profile").status_code == 200
+            assert client.post("/api/v1/session/bootstrap", json={"token": token},
+                               headers={"Origin": details["origin"]}).status_code == 401
+            response = client.post("/api/v1/system/shutdown", json={}, headers={
+                "Origin": details["origin"], "X-CSRF-Token": response.json()["csrf_token"],
+                "Idempotency-Key": str(uuid4()),
+            })
+            assert response.status_code == 200
+        assert process.wait(timeout=20) == 0
+        assert "Traceback" not in process.stderr.read()
+    finally:
+        if process.poll() is None:
+            process.terminate()
+            try:
+                process.wait(timeout=15)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=5)
+        reader.join(timeout=5)
+        process.stdout.close()
+        process.stderr.close()
+
+
+@pytest.mark.parametrize("arguments", [
+    ["--port", "-1"], ["--port", "65536"], ["--frontend-port", "0"], ["--frontend-port", "65536"],
+])
+def test_invalid_terminal_ports_fail_before_startup(monkeypatch, arguments):
+    monkeypatch.setattr(sys, "argv", ["ai-job-search", *arguments])
+    with pytest.raises(SystemExit) as error:
+        server_main()
+    assert error.value.code == 2
+
+
+def test_busy_terminal_port_reports_an_actionable_error(workspace, monkeypatch, capsys):
+    listener = available_socket(0)
+    try:
+        monkeypatch.setattr(sys, "argv", [
+            "ai-job-search", "--workspace", str(workspace.root), "--port", str(listener.getsockname()[1]),
+        ])
+        with pytest.raises(SystemExit) as error:
+            server_main()
+        assert error.value.code == 1
+        assert "Check the port and workspace permissions" in capsys.readouterr().err
+    finally:
+        listener.close()
+
+
+def test_saved_workspace_selection_has_no_desktop_dependency(tmp_path, monkeypatch):
+    monkeypatch.setattr("ai_job_search.server.data_home", lambda: tmp_path)
+    assert selected_workspace() == tmp_path / "workspace"
+    selected = tmp_path / "My workspace"
+    (tmp_path / "workspace.json").write_text(json.dumps({"workspace": str(selected)}), encoding="utf-8")
+    assert selected_workspace() == selected
+    (tmp_path / "workspace.json").write_text('{"workspace":"relative-folder"}', encoding="utf-8")
+    with pytest.raises(AppError, match="use --workspace"):
+        selected_workspace()

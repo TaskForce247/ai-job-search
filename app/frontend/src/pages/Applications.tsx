@@ -10,7 +10,6 @@ import { AIReadinessNote } from '../components/SetupControls';
 import { EvaluationView } from '../components/proposals';
 import { Alert, Badge, Button, Empty, ErrorPanel, ExternalLink, Field, formatDate, humanize, Loading, Modal, PageHeader, Pager, Panel, safeUrl, today } from '../components/ui';
 import { RunActions } from './Activity';
-import { OpenArtifactFolder } from './Settings';
 
 type OutcomeStatus = typeof outcomeStatuses[number];
 
@@ -276,7 +275,6 @@ export function ApplicationDetailPage() {
           'A full job evaluation and your explicit approval come before document preparation. Check Activity for a pending decision.'}
       </Empty>}
       {view?.pdf_artifact_id && <div className="actions">
-        <OpenArtifactFolder artifactId={view.pdf_artifact_id} />
         {!view.stale && !dirty && <a href={artifactUrl(view.pdf_artifact_id)} download>Download {kind === 'cv' ? 'CV' : 'cover letter'} PDF</a>}
       </div>}
       <details className="rewrite-panel"><summary>Request a targeted rewrite</summary>

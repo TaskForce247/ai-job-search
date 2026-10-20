@@ -5,14 +5,6 @@ import type { ApiSchema, RunAccepted, SettingsView } from '../types';
 import { AIConnection, DependencyStatus, PortalControls, PreferencesForm, WorkspaceControls } from '../components/SetupControls';
 import { Alert, ApprovalLink, Button, ErrorPanel, Field, Loading, Modal, PageHeader, Panel } from '../components/ui';
 
-export function OpenArtifactFolder({ artifactId }: { artifactId: string }) {
-  const { notify } = useNotices();
-  const action = useAction(() => api<unknown>(`/artifacts/${encodeURIComponent(artifactId)}/open-folder`, { method: 'POST', body: {} }),
-    () => notify('Containing folder opened on this computer.'));
-  return <div><Button variant="secondary" busy={action.isPending} onClick={() => action.mutate()}>Open containing folder</Button>
-    <ErrorPanel error={action.error} /></div>;
-}
-
 function DataControls() {
   const [backupPassphrase, setBackupPassphrase] = useState('');
   const [restorePassphrase, setRestorePassphrase] = useState('');
@@ -41,8 +33,7 @@ function DataControls() {
             value={backupPassphrase} onChange={(event) => setBackupPassphrase(event.target.value)} />
         </Field>
         <ErrorPanel error={backup.error} /><div><Button busy={backup.isPending} type="submit">Create backup</Button></div>
-        {backup.data && <div className="actions"><a className="button button-secondary" href={artifactUrl(backup.data.artifact_id)} download>Download backup</a>
-          <OpenArtifactFolder artifactId={backup.data.artifact_id} /></div>}
+        {backup.data && <a className="button button-secondary" href={artifactUrl(backup.data.artifact_id)} download>Download backup</a>}
       </form>
     </Panel>
     <Panel title="Restore a backup">
@@ -88,16 +79,17 @@ function ShutdownControl() {
   const active = runs.allRuns.filter((run) => ['running', 'queued', 'awaiting_user'].includes(run.status)).length;
   const action = useAction(() => api<unknown>('/system/shutdown', { method: 'POST', body: {} }),
     () => { setClosed(true); setOpen(false); });
-  return <Panel title="Quit the local application">
-    <p>Closing this browser tab does not stop work. Quit here to safely stop the app’s local service.</p>
-    {closed ? <Alert title="The application is closing">Reopen it from your app shortcut when you are ready to continue.</Alert>
-      : <Button variant="secondary" onClick={() => setOpen(true)}>Quit application</Button>}
-    <Modal open={open} title="Quit AI Job Search?" onClose={() => { if (!action.isPending) setOpen(false); }}>
+  return <Panel title="Stop the backend">
+    <p>Closing this tab does not stop work. Stop here or press Ctrl+C in the backend terminal.
+      Stop a separate frontend server with Ctrl+C in its own terminal.</p>
+    {closed ? <Alert title="The backend is stopping">Run the backend command again and open its fresh login link to continue.</Alert>
+      : <Button variant="secondary" onClick={() => setOpen(true)}>Stop backend</Button>}
+    <Modal open={open} title="Stop the local backend?" onClose={() => { if (!action.isPending) setOpen(false); }}>
       <p>{active ? `${active} operations are active or waiting for a decision. They will stop safely and retain recovery checkpoints.` :
         'The local service will stop. Your saved workspace will remain on this computer.'}</p>
       <ErrorPanel error={action.error} />
       <div className="actions"><Button variant="secondary" disabled={action.isPending} onClick={() => setOpen(false)}>Keep open</Button>
-        <Button variant="danger" busy={action.isPending} onClick={() => action.mutate()}>Quit safely</Button></div>
+        <Button variant="danger" busy={action.isPending} onClick={() => action.mutate()}>Stop safely</Button></div>
     </Modal>
   </Panel>;
 }

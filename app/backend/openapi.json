@@ -188,22 +188,6 @@
         }
       }
     },
-    "/api/v1/workspace/pick": {
-      "post": {
-        "summary": "Pick Workspace",
-        "operationId": "pick_workspace_api_v1_workspace_pick_post",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/v1/workspace/imports": {
       "post": {
         "summary": "Import Workspace",
@@ -1553,43 +1537,6 @@
       "get": {
         "summary": "Artifact",
         "operationId": "artifact_api_v1_artifacts__artifact_id__get",
-        "parameters": [
-          {
-            "name": "artifact_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Artifact Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/artifacts/{artifact_id}/open-folder": {
-      "post": {
-        "summary": "Open Artifact Folder",
-        "operationId": "open_artifact_folder_api_v1_artifacts__artifact_id__open_folder_post",
         "parameters": [
           {
             "name": "artifact_id",
@@ -3618,10 +3565,11 @@
       },
       "WorkspaceInput": {
         "properties": {
-          "grant": {
+          "path": {
             "type": "string",
-            "maxLength": 200,
-            "title": "Grant"
+            "maxLength": 4096,
+            "minLength": 1,
+            "title": "Path"
           },
           "create": {
             "type": "boolean",
@@ -3632,7 +3580,7 @@
         "additionalProperties": false,
         "type": "object",
         "required": [
-          "grant"
+          "path"
         ],
         "title": "WorkspaceInput"
       }

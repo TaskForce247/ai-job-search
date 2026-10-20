@@ -15,7 +15,7 @@ POSTING = {
 }
 
 
-def test_session_requires_native_bootstrap_and_one_use_token(api):
+def test_session_requires_terminal_bootstrap_and_one_use_token(api):
     client, app = api
     stranger = TestClient(app, base_url="http://127.0.0.1:8765")
     try:
@@ -213,10 +213,65 @@ def test_switching_workspace_closes_the_previous_monitor(api, tmp_path, monkeypa
     assert client.get("/api/v1/dashboard").status_code == 200
     assert previous.application_watcher is not None
     destination = tmp_path / "Selected workspace"
-    monkeypatch.setattr("ai_job_search.api.NativeDialogs.choose_directory", lambda self: destination)
     monkeypatch.setattr("ai_job_search.config.data_home", lambda: tmp_path / "App settings")
-    grant = client.post("/api/v1/workspace/pick").json()["grant"]
-    response = client.post("/api/v1/workspace", json={"grant": grant, "create": True})
+    response = client.post("/api/v1/workspace", json={"path": str(destination), "create": True})
     assert response.status_code == 200, response.text
     assert app.state.workspace.root == destination
     assert previous.application_watcher is None and previous.overview_revision is None
+    assert client.post("/api/v1/workspace", json={"path": str(destination), "create": True}).json() == response.json()
+
+
+def test_workspace_selection_rejects_relative_paths_and_old_native_grants(api, tmp_path):
+    client, app = api
+    original = app.state.workspace
+    for data in (
+        {"path": "", "create": True},
+        {"path": "relative-folder", "create": True},
+        {"path": str(tmp_path) + "\x00", "create": True},
+        {"grant": "obsolete-native-grant", "create": True},
+    ):
+        client.headers["Idempotency-Key"] = str(uuid4())
+        assert client.post("/api/v1/workspace", json=data).status_code == 422
+        assert app.state.workspace is original
+
+
+def test_workspace_selection_requires_csrf_and_preserves_failed_selections(api, tmp_path):
+    client, app = api
+    original = app.state.workspace
+    destination = tmp_path / "Not approved"
+    response = client.post("/api/v1/workspace", json={"path": str(destination), "create": True},
+                           headers={"X-CSRF-Token": "wrong"})
+    assert response.status_code == 403 and not destination.exists()
+    destination.mkdir()
+    (destination / "unrelated.txt").write_text("Retain this file.", encoding="utf-8")
+    response = client.post("/api/v1/workspace", json={"path": str(destination), "create": True})
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "directory_not_empty"
+    assert app.state.workspace is original and not app.state.busy
+    assert (destination / "unrelated.txt").read_text(encoding="utf-8") == "Retain this file."
+    assert client.get("/api/v1/profile").status_code == 200
+
+
+def test_desktop_only_endpoints_are_removed(api):
+    client, app = api
+    assert "/api/v1/workspace/pick" not in app.openapi()["paths"]
+    assert "/api/v1/artifacts/{artifact_id}/open-folder" not in app.openapi()["paths"]
+    assert client.post("/api/v1/workspace/pick", json={}).status_code in (404, 405)
+    client.headers["Idempotency-Key"] = str(uuid4())
+    assert client.post("/api/v1/artifacts/unknown/open-folder", json={}).status_code in (404, 405)
+
+
+def test_workspace_io_failure_is_actionable_and_keeps_the_current_workspace(api, tmp_path, monkeypatch):
+    client, app = api
+    original = app.state.workspace
+
+    def unavailable(*args, **kwargs):
+        raise PermissionError("Synthetic directory access failure.")
+
+    monkeypatch.setattr("ai_job_search.api.Workspace", unavailable)
+    response = client.post("/api/v1/workspace", json={"path": str(tmp_path / "Unavailable"), "create": True})
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "workspace_unavailable"
+    assert "permissions" in response.json()["error"]["message"]
+    assert app.state.workspace is original and not app.state.busy
+    assert client.get("/api/v1/profile").status_code == 200

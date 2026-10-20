@@ -1,14 +1,11 @@
 from __future__ import annotations
 
 import os
-import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
 
 def framework_root() -> Path:
-    if getattr(sys, "frozen", False):
-        return Path(sys._MEIPASS) / "framework"
     return Path(__file__).resolve().parents[4]
 
 
@@ -27,6 +24,4 @@ class Config:
 
     @property
     def frontend(self) -> Path:
-        if getattr(sys, "frozen", False):
-            return Path(sys._MEIPASS) / "frontend"
         return self.resources / "app" / "frontend" / "dist"

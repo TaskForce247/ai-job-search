@@ -12,11 +12,11 @@ if (!['127.0.0.1', 'localhost', '[::1]'].includes(targetUrl.hostname) || !['http
 export default defineConfig({
   plugins: [react(), {
     name: 'local-pdfjs-resources',
-    writeBundle() {
+    configResolved() {
       for (const directory of ['cmaps', 'standard_fonts', 'wasm']) {
         cpSync(
           fileURLToPath(new URL(`node_modules/pdfjs-dist/${directory}`, import.meta.url)),
-          fileURLToPath(new URL(`dist/pdfjs/${directory}`, import.meta.url)),
+          fileURLToPath(new URL(`public/pdfjs/${directory}`, import.meta.url)),
           { recursive: true },
         );
       }

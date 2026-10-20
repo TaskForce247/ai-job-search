@@ -28,11 +28,10 @@ dev = [
     "pytest==8.4.2",
     "pytest-asyncio==1.3.0",
     "ruff==0.14.6",
-    "pyinstaller==6.19.0",
 ]
 
 [project.scripts]
-ai-job-search = "ai_job_search.launcher:main"
+ai-job-search = "ai_job_search.server:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

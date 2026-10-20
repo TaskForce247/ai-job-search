@@ -26,11 +26,11 @@ from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
 from ai_job_search.api import create_app
 from ai_job_search.config import Config
 from ai_job_search.documents import DocumentService, render_cover, render_cv
-from ai_job_search.launcher import available_socket
 from ai_job_search.network import WebClient
 from ai_job_search.policy import REFERENCES
 from ai_job_search.portals import REVIEWED
 from ai_job_search.runtime import AgentRuntime, Credentials
+from ai_job_search.server import available_socket
 from ai_job_search.workflows import WorkflowService
 
 FRONTEND = Path(__file__).resolve().parents[1]

@@ -50,6 +50,7 @@ def minimal_environment() -> dict[str, str]:
         "SYSTEMROOT", "WINDIR", "COMSPEC", "PATH", "PATHEXT", "TEMP", "TMP", "HOME",
         "USERPROFILE", "LOCALAPPDATA", "APPDATA", "PROGRAMFILES", "PROGRAMFILES(X86)",
         "COMMONPROGRAMFILES", "USERNAME", "USER", "LANG", "LC_ALL", "SSL_CERT_FILE",
+        "DBUS_SESSION_BUS_ADDRESS", "XDG_RUNTIME_DIR", "XDG_CONFIG_HOME", "XDG_DATA_HOME",
     }
     return {key: value for key, value in os.environ.items() if key.upper() in names}
 

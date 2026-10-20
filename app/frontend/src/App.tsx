@@ -45,13 +45,14 @@ export function SessionGate({ children }: { children: ReactNode }) {
   if (state === 'ready') return children;
   return <div className="startup-screen"><div className="startup-brand"><Brand /></div><Panel>
     {state === 'pending' ? <Loading label="Opening your secure local workspace…" /> : state === 'expired' ? <>
-      <p className="eyebrow">Local session required</p><h1>Reopen from your app shortcut.</h1>
-      <p>This browser session is not connected to the local application. Close this tab and open
-        AI Job Search from its shortcut or the launcher’s Reopen action.</p>
-      <Alert>No account or password is needed. The shortcut securely connects this browser to the app running on your computer.</Alert>
+      <p className="eyebrow">Local session required</p><h1>Open the login link from your backend terminal.</h1>
+      <p>This browser session is not connected. Open the one-use link printed when the backend started.
+        If it expired or was already used, restart the backend for a fresh link.</p>
+      <Alert>No account or password is needed. The terminal link securely connects this browser to your local backend.
+        Restarting stops active work and preserves saved checkpoints; an interrupted AI call may still incur charges.</Alert>
     </> : <>
       <h1>We couldn’t reach the local app.</h1><ErrorPanel error={error} />
-      <p>Make sure AI Job Search is open. If it has stopped, reopen it from its shortcut.</p>
+      <p>Make sure the backend is running in its terminal. If it stopped, start it again and open its fresh login link.</p>
       <Button onClick={() => {
         setState('pending');
         void retrySession().then(() => setState('ready')).catch((cause: unknown) => {

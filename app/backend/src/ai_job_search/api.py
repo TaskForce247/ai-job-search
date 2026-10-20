@@ -4,9 +4,7 @@ import asyncio
 import base64
 import json
 import mimetypes
-import secrets
 import threading
-import time
 from contextlib import asynccontextmanager
 from datetime import date, timedelta
 from pathlib import Path
@@ -80,22 +78,6 @@ SECURITY_HEADERS = {
 }
 
 
-class NativeDialogs:
-    def choose_directory(self) -> Path | None:
-        raise AppError("native_dialog_unavailable", "Open this app through its desktop launcher to choose a folder.", 409)
-
-    def open_folder(self, path: Path) -> None:
-        import os
-        import subprocess
-        import sys
-        if sys.platform == "win32":
-            os.startfile(path)
-        elif sys.platform == "darwin":
-            subprocess.Popen(["open", str(path)])
-        else:
-            subprocess.Popen(["xdg-open", str(path)])
-
-
 def error_response(error: AppError, correlation_id: str | None = None) -> JSONResponse:
     response = JSONResponse(
         status_code=error.status,
@@ -124,13 +106,10 @@ def paginate(items: list[dict], limit: int, cursor: str | None, scope: object) -
     return {"items": items[offset:end], "next_cursor": next_cursor if end < len(items) else None, "total": len(items)}
 
 
-def create_app(config: Config | None = None, *, dialogs: NativeDialogs | None = None,
-               on_shutdown: Callable[[], None] | None = None) -> FastAPI:
+def create_app(config: Config | None = None, *, on_shutdown: Callable[[], None] | None = None) -> FastAPI:
     config = config or Config()
     workspace = Workspace(config.workspace, config.resources, create=not config.workspace.exists())
     sessions = Sessions(config.origin, config.session_seconds)
-    native = dialogs or NativeDialogs()
-    grants: dict[str, tuple[Path, float]] = {}
     mutation_locks: dict[str, asyncio.Lock] = {}
     mutation_gate = asyncio.Lock()
     gate = threading.Lock()
@@ -203,7 +182,7 @@ def create_app(config: Config | None = None, *, dialogs: NativeDialogs | None = 
                 raise AppError("origin_required", "Use the local application interface to make changes.", 403)
             if app.state.busy and request.url.path not in (PREFIX + "/system/shutdown", "/healthz"):
                 raise AppError("workspace_recovering", "The workspace is switching or recovering. Retry shortly.", 503)
-            cached_mutation = private and mutation and not bootstrap and not request.url.path.endswith("/workspace/pick")
+            cached_mutation = private and mutation and not bootstrap
             if cached_mutation:
                 key = request.headers.get("idempotency-key", "")
                 if not 8 <= len(key) <= 128 or any(c not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_.:" for c in key):
@@ -285,7 +264,7 @@ def create_app(config: Config | None = None, *, dialogs: NativeDialogs | None = 
     @app.post(PREFIX + "/system/shutdown")
     def shutdown():
         if on_shutdown is None:
-            raise AppError("launcher_unavailable", "Use the running application's window to quit.", 409)
+            raise AppError("shutdown_unavailable", "Stop the backend with Ctrl+C in its terminal.", 409)
         app.state.stopping = True
         threading.Timer(0.2, on_shutdown).start()
         return {"accepted": True}
@@ -301,24 +280,9 @@ def create_app(config: Config | None = None, *, dialogs: NativeDialogs | None = 
     def get_workspace():
         return workspace_view(ws())
 
-    @app.post(PREFIX + "/workspace/pick")
-    def pick_workspace():
-        path = native.choose_directory()
-        if path is None:
-            return {"cancelled": True, "grant": "", "display_path": ""}
-        token = secrets.token_urlsafe(32)
-        grants[token] = path, time.monotonic() + 300
-        return {"grant": token, "display_path": str(path)}
-
-    def consume_grant(token: str) -> Path:
-        value = grants.pop(token, None)
-        if value is None or value[1] < time.monotonic():
-            raise AppError("directory_grant_expired", "Choose the directory again using the native folder picker.", 409)
-        return value[0]
-
     @app.post(PREFIX + "/workspace")
     async def change_workspace(data: WorkspaceInput):
-        path = consume_grant(data.grant)
+        path = Path(data.path)
         with gate:
             if app.state.busy:
                 raise AppError("workspace_busy", "A workspace operation is already running.", 409)
@@ -354,7 +318,7 @@ def create_app(config: Config | None = None, *, dialogs: NativeDialogs | None = 
             previous_workspace.close()
             close_instance_lock(old_lock)
             return result
-        except BaseException:
+        except BaseException as exc:
             if not switched:
                 if new_worker:
                     await asyncio.to_thread(new_worker.stop)
@@ -364,17 +328,16 @@ def create_app(config: Config | None = None, *, dialogs: NativeDialogs | None = 
                     selected.close()
                 if previous_worker and previous_stopped:
                     previous_worker.start()
+            if isinstance(exc, OSError):
+                raise AppError("workspace_unavailable", "The workspace folder could not be opened. Check its full path, permissions, and available disk space.", 409) from exc
             raise
         finally:
             app.state.busy = False
 
     @app.post(PREFIX + "/workspace/imports", status_code=202, response_model=Queued)
     def import_workspace(data: dict[str, str], request: Request):
-        # Selection changes are a separate explicit action. This previews only the current workspace.
-        if data.get("grant"):
-            selected = consume_grant(data["grant"])
-            if selected.resolve() != ws().root.resolve():
-                raise AppError("select_workspace_first", "Open the selected existing workspace first, then review its import.", 409)
+        if data:
+            raise AppError("select_workspace_first", "Select the workspace first, then inspect its existing records.", 409)
         return {"run_id": workflows().enqueue(operation(request), "workspace_import", {})}
 
     @app.get(PREFIX + "/profile", response_model=ProfileView)
@@ -670,15 +633,6 @@ def create_app(config: Config | None = None, *, dialogs: NativeDialogs | None = 
         return FileResponse(ws().path(record["relative_path"]), media_type=record["media_type"],
                             filename=record["name"], content_disposition_type="inline" if record["media_type"] == "application/pdf" else "attachment")
 
-    @app.post(PREFIX + "/artifacts/{artifact_id}/open-folder")
-    def open_artifact_folder(artifact_id: str):
-        record = ws().store.artifact(artifact_id)
-        path = ws().path(record["relative_path"])
-        if not path.is_file():
-            raise AppError("artifact_missing", "This file is missing.", 404)
-        native.open_folder(path.parent)
-        return {"opened": True}
-
     @app.post(PREFIX + "/backups")
     def backup(data: BackupInput, request: Request):
         return {"artifact_id": BackupService(ws()).create(operation(request), data.passphrase)}
@@ -720,7 +674,7 @@ def create_app(config: Config | None = None, *, dialogs: NativeDialogs | None = 
     else:
         @app.get("/", include_in_schema=False)
         def missing_frontend():
-            return error_response(AppError("frontend_missing", "The application UI has not been built. Install a packaged release or build the frontend in the developer setup.", 503))
+            return error_response(AppError("frontend_missing", "Start the Vite frontend separately, or run npm run build in app/frontend. See app/README.md.", 503))
 
     return app
 
@@ -741,7 +695,7 @@ def open_instance_lock(workspace: Workspace):
             fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
     except OSError as exc:
         handle.close()
-        raise AppError("workspace_already_open", "This workspace is already open in another app window. Use that launcher instead.", 409) from exc
+        raise AppError("workspace_already_open", "Another backend already owns this workspace. Use its terminal and browser session, or stop it before restarting.", 409) from exc
     return handle
 
 

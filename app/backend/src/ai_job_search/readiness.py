@@ -4,6 +4,7 @@ import hashlib
 import os
 import re
 import shutil
+import sys
 import urllib.request
 import zipfile
 from pathlib import Path
@@ -71,12 +72,15 @@ def readiness(workspace: Workspace) -> dict:
         {"id": "portals", "label": "Job source runtime", "status": "ready" if portals_ready else "setup_required",
          "description": "Reviewed portal CLIs only. Pasted postings work without Bun.",
          "repair_url": "https://bun.sh/", "can_install": os.name == "nt"},
-        {"id": "tex", "label": "Document tools (MiKTeX)", "status": "ready" if tex_ready else "setup_required",
+        {"id": "tex", "label": "Document tools (LuaLaTeX / XeLaTeX)", "status": "ready" if tex_ready else "setup_required",
          "description": "LuaLaTeX and XeLaTeX are required. Missing packages are reported; compilation never opens package-install dialogs.",
-         "repair_url": "https://miktex.org/download", "can_install": winget_ready or tex_repair_ready},
+         "repair_url": {"win32": "https://miktex.org/download", "darwin": "https://tug.org/mactex/"}.get(
+             sys.platform, "https://tug.org/texlive/"),
+         "can_install": winget_ready or tex_repair_ready},
         {"id": "pdf", "label": "PDF layout tools (Poppler)", "status": "ready" if pdf_ready else "setup_required",
          "description": "Poppler pdftotext with -bbox and pdfinfo. Actual extraction is validated for each PDF; finding a program alone is not a layout pass.",
-         "repair_url": "https://github.com/oschwartz10612/poppler-windows/releases", "can_install": winget_ready},
+         "repair_url": "https://github.com/oschwartz10612/poppler-windows/releases" if os.name == "nt" else "https://poppler.freedesktop.org/",
+         "can_install": winget_ready},
     ]
     return {"dependencies": dependencies, "ai_connected": connected, "privacy_consent": settings.privacy_consent,
             "workspace_path": str(workspace.root), "active_runs": active, "version": __version__}

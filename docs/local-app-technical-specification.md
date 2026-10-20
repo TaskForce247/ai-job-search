@@ -1,18 +1,20 @@
 # Technical Specification: Local AI Job Search Application
 
-**Status:** Implementation specification v0.1; [development preview and release gates](../app/README.md)
+**Status:** Implementation specification v0.2; [source startup and release gates](../app/README.md)
 
-**Date:** 2026-10-19
+**Date:** 2026-10-20
 
 **Basis:** Analysis of this repository and its canonical workflow specifications
 
-**Confirmed deployment:** One user, on their own computer, using a graphical interface instead of a terminal
+**Confirmed deployment:** One user, on their own computer, using a browser interface after basic command-line setup. No desktop app or Docker distribution.
 
 ## 1. Product definition
 
-Build a local application that makes the existing job-search framework usable without knowing AI prompts, slash commands, Git, Bun, Python, or LaTeX.
+Build a local website that makes the existing job-search framework usable without knowing AI prompts, slash commands, or how to operate an interactive AI CLI. Users can install documented dependencies and start local servers from a terminal.
 
-The user opens an application shortcut, works in a browser-based interface, and follows guided screens to build a profile, find jobs, prepare application documents, and track results. The application starts and manages the local services and tools it needs. It does not require a hosted application server or an application account.
+The user follows the README to install Python/Node dependencies, starts a headless backend and a separate Vite frontend, and opens the backend's terminal-issued login link. Alternatively, the backend serves a built frontend with no Vite process. All job-search workflows use guided browser screens. A Windows executable, native desktop launcher, Docker, hosted application server, and application account are not required.
+
+The 2026-10-20 deployment decision supersedes the original no-terminal/Windows-launcher requirement. Docker was considered and explicitly deferred; it must not become a hidden setup prerequisite.
 
 **This is not a SaaS specification.** There are no tenants, organizations, cloud application databases, shared job queues, or subscription-management features.
 
@@ -32,7 +34,7 @@ Local execution must never be described as "your information never leaves your c
 
 ### 1.2 Primary user journey
 
-1. Open the application and complete guided dependency and AI-connection setup.
+1. Follow the README to start the website, check dependency readiness, and configure the AI connection.
 2. Import a CV or existing workspace, or build a profile through a questionnaire.
 3. Confirm extracted facts and choose job preferences.
 4. Search supported sources or paste a job URL or description.
@@ -100,7 +102,7 @@ Consequently, the required work is **a frontend plus a thin local application/ru
 
 | Capability | Required outcome |
 |---|---|
-| Launch and readiness | Open from a shortcut; detect and explain missing dependencies without requiring a terminal. |
+| Launch and readiness | Document separate backend/frontend commands and the one-server alternative; detect and explain missing dependencies. |
 | Workspace onboarding | Create a local workspace or import an existing one without overwriting it silently. |
 | Profile | Guided import/questionnaire, editable career information, preferences, languages, and confirmed facts. |
 | Jobs | Search supported portals, paste a posting, filter results, view provenance, deduplicate, rank, and save interest. |
@@ -118,7 +120,6 @@ Consequently, the required work is **a frontend plus a thin local application/ru
 - Portable HTML dashboard export.
 - Gmail and Notion integrations with explicit connection and data-sharing consent.
 - Vetted custom templates and additional portal adapters.
-- Additional operating-system installers.
 - A separately evaluated local-model adapter.
 
 ### 3.3 Explicit non-goals
@@ -130,7 +131,7 @@ Consequently, the required work is **a frontend plus a thin local application/ru
 - Automatically installing or executing arbitrary portal plugins or document toolchains.
 - Guaranteed job coverage, an interview probability, or an "ATS acceptance" guarantee.
 - OCR and DOCX ingestion in the initial release.
-- Requiring Docker, Git, a source checkout, or development servers for normal use.
+- Native desktop applications, executable installers, and Docker/container distribution.
 
 ## 4. User experience and frontend
 
@@ -210,7 +211,7 @@ Required controls:
 - See evidence behind factual claims and add a corrected fact to the profile.
 - View reviewer findings and the changes made in response.
 - See page counts, layout findings, contact extraction, and keyword coverage.
-- Export PDFs and open the containing folder.
+- Download PDFs; show the local workspace path in Settings rather than requiring native folder controls.
 - Open the employer's application page, then separately record submission.
 
 Raw LaTeX is an optional advanced view, not the normal editor. Any document edit invalidates the affected compile and verification results until the new revision is checked.
@@ -252,22 +253,25 @@ Unknown imported statuses remain visible for review. Never silently discard reco
 | Business persistence | Existing workspace files | Preserve the current source-of-truth model and user ownership. |
 | Portal execution | Existing Bun CLIs | Avoid rewriting six existing integrations. |
 | Document rendering | Stock template adapters, LuaLaTeX/XeLaTeX, existing verification utilities | Preserve document quality while hiding the toolchain. |
-| Distribution | Bundled local backend, built frontend assets, small native launcher | A shortcut-based experience without a Node development server or user-managed Python environment. |
+| Distribution | Source checkout, Python virtual environment, npm-installed frontend | Basic command-line setup with no desktop launcher, executable installer, or Docker. |
 
-Exact library versions must be pinned during implementation. The recommended first packaging target is Windows x64, reflecting the current environment; keep backend and adapter code portable for later macOS/Linux packaging.
+Pin library versions. Document Windows PowerShell and macOS/Linux startup, while distinguishing documented portability from actual platform acceptance. Keep OS credentials and process-management adapters behind the shared backend; they are not a native user interface.
 
-Do not introduce PostgreSQL, Redis, Celery, Kubernetes, or independent microservices for a single-user desktop workload.
+Do not introduce PostgreSQL, Redis, Celery, Kubernetes, or independent microservices for a single-user local workload.
 
 ### 5.2 Process topology
 
 ```text
-Application shortcut / native launcher
+Terminal: python -m ai_job_search
               |
-              +-- starts and owns local backend
-              +-- opens default browser
-              +-- provides Reopen and Quit
+              +-- starts and owns loopback backend
+              +-- prints one-use browser login link
+              +-- Ctrl+C performs graceful shutdown
 
-Browser: built React interface
+Optional second terminal: Vite frontend
+              +-- proxies /api to the loopback backend
+
+Browser: React interface (Vite or built assets)
               |
               | same-origin HTTP + server-sent events
               v
@@ -395,7 +399,7 @@ Retry transient network/provider errors with bounded backoff and jitter. Do not 
 
 Preserve the existing distinction between an unreachable posting and positive evidence of closure. If canonical rank state eventually retires an unreachable entry, display its `expired_reason: unreachable` as "Could not verify; check manually," not "Employer closed this role."
 
-Closing the browser must not terminate work. Quitting the launcher must explain active operations, stop them safely, and preserve recoverable checkpoints.
+Closing the browser must not terminate work. Ctrl+C or the browser's confirmed Stop backend action must stop owned work safely and preserve recoverable checkpoints. Explain that interrupted AI calls may still incur charges.
 
 ## 7. Persistence, identity, and compatibility
 
@@ -407,7 +411,7 @@ Default new-workspace location on Windows:
 %LOCALAPPDATA%\AIJobSearch\workspace\
 ```
 
-Allow a user-selected local location. The installed application and bundled framework resources must be separate from writable career data. Do not create a Git repository or push profile data anywhere.
+On macOS/Linux, the default is `~/.local/share/AIJobSearch/workspace`. Allow a user-selected absolute local path through a confirmed browser form or the backend's `--workspace` option. Keep source code and framework resources separate from writable career data. Do not create a Git repository or push profile data anywhere.
 
 An existing repository can be selected as a workspace, but show that profile files may be tracked and warn before modifying personal data in a public-fork workflow. Never commit, push, or publish workspace contents automatically.
 
@@ -505,7 +509,7 @@ Enable foreign keys and use transactions. Use WAL only in supported local-filesy
 Serve the frontend and API from the same loopback origin. Prefix endpoints with `/api/v1`.
 
 - Generate the TypeScript client/types from the backend's OpenAPI contract.
-- Use UUIDs for records and artifacts, never browser-supplied absolute paths.
+- Use UUIDs for records and artifacts. Workspace selection is the sole explicit absolute-path input; validate it as a local root and require user confirmation, never take paths from posting content.
 - Return `202 Accepted` with a run ID for long-running operations.
 - Require an idempotency key for operation creation and non-repeatable mutations.
 - Require an expected revision for profile, document, approval, and status changes.
@@ -517,11 +521,11 @@ Serve the frontend and API from the same loopback origin. Prefix endpoints with 
 
 | Method | Endpoint | Purpose |
 |---|---|---|
-| POST | `/session/bootstrap` | Exchange the launcher's one-use token for a local session. |
+| POST | `/session/bootstrap` | Exchange the terminal-issued one-use token for a local session. |
 | GET | `/system/readiness` | Runtime, workspace, source, and document-tool readiness. |
 | POST | `/system/shutdown` | Confirmed local shutdown; stop/recover active work safely. |
 | GET | `/workspace` | Selected workspace and revision summary. |
-| POST | `/workspace` | Create a workspace at a launcher-approved local location. |
+| POST | `/workspace` | Select/create a validated absolute local workspace after user confirmation. |
 | POST | `/workspace/imports` | Inspect a selected workspace and produce an import proposal. |
 | POST | `/documents/imports` | Validate/copy uploaded documents and create an extraction run. |
 | GET | `/profile` | Typed profile with evidence and source revision. |
@@ -641,7 +645,7 @@ For the stock templates, acceptance includes an exactly two-page CV and exactly 
 
 Keep the existing distinction between layout-check success, layout failure, and a skipped/unavailable extractor. `verify_layout.py` exit 2 is not a pass. The UI must identify the actual extractor and any degraded verification.
 
-The installer should provide the required PDF tooling so degraded mode is exceptional rather than normal. When a documented optional check is unavailable, follow canonical fallback rules and show "Needs manual check," not "Verified."
+The README must explain installation of the required PDF tooling, and readiness must identify missing tools before generation. When a documented optional check is unavailable, follow canonical fallback rules and show "Needs manual check," not "Verified."
 
 Grounding checks must compare dates, titles, employers, metrics, and other material claims with the canonical profile evidence. A source link generated by a model is not by itself proof of semantic truth; uncertain claims require correction or human review.
 
@@ -667,9 +671,9 @@ Single-user does not mean the local HTTP service can be unauthenticated to every
 
 ### 11.1 Loopback service
 
-- Bind to an available loopback address/port, never `0.0.0.0` or a LAN interface.
+- Bind to loopback only (default `127.0.0.1:8765`), never `0.0.0.0` or a LAN interface. An explicit zero port may select an available port.
 - Restrict accepted Host and Origin values to the launched local origin; reject unexpected hosts to reduce DNS-rebinding risk.
-- Use a cryptographically random, short-lived, one-use bootstrap token supplied by the launcher in a URL fragment.
+- Print a cryptographically random, 90-second, one-use bootstrap token in a terminal-issued URL fragment. `--frontend-port` targets a separately running loopback frontend; it never changes API origin enforcement.
 - Exchange it for an HttpOnly, SameSite-protected local session, then remove the fragment from browser history.
 - Require CSRF protection for state changes; do not depend on CORS alone.
 - Disable permissive CORS, protect event/artifact endpoints, and reject unauthorized requests before performing work.
@@ -679,7 +683,7 @@ The local session is an anti-cross-site protection mechanism, not a user-account
 
 ### 11.2 Files and processes
 
-Resolve and validate paths against the approved workspace, including symlinks and Windows junctions. Use artifact IDs and approved OS file dialogs instead of accepting arbitrary paths from web content.
+Resolve and validate paths against the approved workspace, including symlinks and Windows junctions. Use artifact IDs for documents and downloads. The authenticated workspace form accepts only an explicit absolute local directory path, with confirmation; no unrestricted filesystem browser or native folder dialog is required.
 
 Posting/research retrieval accepts only HTTP(S), rejects URL credentials and private/loopback/link-local destinations, and revalidates DNS resolution and every redirect. An explicitly configured local freehire endpoint is a separate, trusted setting, not an exception a posting can request.
 
@@ -697,41 +701,43 @@ Keep diagnostics local by default, with content/secret redaction and retention c
 
 Backups contain sensitive career information. Exclude credentials, offer encryption, and explain that local files are not automatically encrypted unless that feature or OS disk encryption is enabled.
 
-## 12. Packaging, startup, updates, and recovery
+## 12. Source setup, startup, updates, and recovery
 
 ### 12.1 Launch contract
 
-Normal use must require no terminal commands.
+Basic terminal setup and startup are supported; job-search workflows must not require AI CLI commands.
 
-The launcher must:
+The backend entrypoint must:
 
 1. Enforce one backend instance per workspace.
-2. Start the bundled backend and verify readiness.
-3. Open the bundled frontend in the default browser using the bootstrap handshake.
-4. Provide native Reopen and Quit controls if the browser is closed.
-5. Show an understandable native error if startup fails before the browser UI is available.
+2. Start the loopback backend and verify readiness.
+3. Print a one-use browser login link, targeting Vite when `--frontend-port` is supplied.
+4. Stay in the terminal and handle Ctrl+C and supported termination signals gracefully.
+5. Report startup failures and occupied ports in the terminal with a nonzero exit code.
+
+The README must give one-time dependency setup, separate frontend/backend commands, the built-frontend alternative, workspace selection, stopping/restarting, and session troubleshooting. Start Vite before the backend so the browser can use its 90-second login link immediately.
 
 Do not install an always-on system service or require administrator rights for normal operation. Work resumes only when the app is running; scheduled scraping while the machine/app is off is not implied.
 
 ### 12.2 Dependency handling
 
-Separate developer setup from end-user installation.
+Use a Python virtual environment and npm lockfile for documented source setup.
 
-The installer should package the Python runtime/backend, built frontend, supported Bun runtime, PDF tools, and reviewed framework/template resources, subject to distribution licenses.
+Python and Node are user-installed prerequisites. Bun is needed only for portal searches; LuaLaTeX, XeLaTeX, template packages, fonts, and Poppler are needed for fully checked documents. Keep them optional for profile access, pasted postings, tracking, and existing previews.
 
-The Agent SDK currently bundles a native runtime for supported packages/platforms; verify that the chosen build retains it. Do not assume all wheel/platform combinations include it.
+The Agent SDK bundles a native runtime for supported wheels/platforms; verify its presence without requiring a separate interactive Claude Code installation. Do not assume every wheel/CPU combination is supported.
 
-LaTeX is the largest packaging risk. Validate a supported per-user TeX installation or a versioned optional document-tool download with all required packages/fonts. Compilation must not trigger hidden interactive package-install dialogs.
+Validate a supported TeX installation with all required packages/fonts. Document TeX Live, MacTeX, or MiKTeX setup; compilation must not trigger hidden interactive package-install dialogs.
 
-If a dependency cannot legally or practically be bundled, the readiness screen must provide a guided installer/repair action with consent, progress, and verification. "Open a terminal and paste this command" is not an acceptable normal setup requirement.
+The readiness screen must provide official setup links and actionable missing-tool states. Existing consent-based Windows dependency repair may remain as an optional backend integration; it is not a Windows desktop app or a cross-platform installer guarantee.
 
-A release cannot claim the no-CLI experience until it passes on a clean supported machine without developer tools.
+A release cannot claim a supported operating system until the documented source setup and core browser journey pass on a clean machine for that platform.
 
 ### 12.3 Updates
 
 Application updates replace code/resources, not personal files. Framework updates require compatibility checks, a diff of affected personalized sections, a backup, and explicit approval before merging.
 
-Pin dependencies and resource versions for reproducible builds. Verify downloaded installers/resources and sign releases where the target platform supports it.
+Pin dependencies and resource versions for reproducible setup. Verify any downloaded installers/resources.
 
 Preserve the user's active template and profile changes. Never reapply a pristine upstream template over personalized files as an update mechanism.
 
@@ -764,8 +770,6 @@ app\
       storage\
     tests\
     pyproject.toml
-  launcher\
-  packaging\
 docs\
   local-app-technical-specification.md
 ```
@@ -790,7 +794,7 @@ Reference performance environment: Windows x64 laptop, four CPU cores, 16 GB RAM
 | Accessibility | Primary journeys keyboard-complete, with no critical automated accessibility findings and a manual accessibility pass. |
 | Offline behavior | Profile, stored postings, tracking, and existing document previews work with outbound network access blocked. |
 | Privacy | No application-controlled outbound traffic on an idle offline/local-read journey; no third-party UI assets or telemetry by default. |
-| Installation | Clean supported-machine install, launch, dependency setup, and core journey without a developer terminal. |
+| Installation | Documented source dependency installation, startup, and core browser journey on each claimed platform; no Docker or desktop executable. |
 
 Model-dependent turnaround times must be measured in the runtime spike. Do not promise a fixed application-generation time before collecting that evidence.
 
@@ -820,7 +824,7 @@ Retain template compilation and PDF verification on supported TeX configurations
 | Runtime contract | Typed model outputs, invalid result handling, permission denial, independent reviewer input, usage limits. |
 | Integration | Fixture portals, deterministic fake AI runtime, real template compilation, preview and verification artifacts. |
 | Browser end to end | Onboarding, posting import, approval, document revision, submission, outcome, reload/reconnect. |
-| Packaging | Clean-machine install/uninstall, spaces and non-ASCII workspace paths, no hidden consoles or blocked dialogs. |
+| Startup | Separate backend/frontend and built-frontend modes, secure terminal login links, spaces/non-ASCII paths, graceful terminal shutdown, and no native launcher dependency. |
 | Adversarial fixtures | Posting instructions, malicious Markdown, unsafe URLs, path traversal, untrusted templates, poisoned cache text. |
 
 Use synthetic candidate data and saved portal fixtures. Real credentials, personal profiles, live job searches, and paid model calls must not be prerequisites for routine CI. Separate opt-in live runtime validation from the deterministic suite.
@@ -842,26 +846,27 @@ Use synthetic candidate data and saved portal fixtures. Real credentials, person
 13. Forced termination during multi-file publication recovers to a consistent state before further writes are accepted.
 14. A legacy workspace without deadlines, with status aliases and extra CSV columns, imports without dropping records or unknown fields.
 15. An unrelated website cannot read local career data or trigger a search, write, reset, or export through the loopback API.
-16. A new user installs and completes the core journey on a clean supported computer without entering a shell command.
+16. A user with basic command-line skills follows the README on a clean supported computer, starts the backend/frontend, opens the terminal-issued login link, completes the browser journey, and stops both services without a desktop app or Docker.
 
-Before MVP release, run a usability check with at least five people unfamiliar with AI CLIs. At least four should complete profile confirmation, posting evaluation, document review, and submission recording without learning a command or needing facilitator intervention. Record the specific points of confusion, not only task completion.
+Before MVP release, run a usability check with at least five people comfortable with basic terminal setup but unfamiliar with AI CLIs. At least four should follow the README and complete profile confirmation, posting evaluation, document review, and submission recording without learning AI commands or needing facilitator intervention. Record the specific points of confusion, not only task completion.
 
 ## 16. Delivery plan and architectural gates
 
 | Phase | Deliverable | Exit criterion |
 |---|---|---|
-| 0: Runtime and packaging spike | Minimal local launcher, SDK connection, one structured evaluation, one UI question, restricted tools, real stock-template compile/preview | Demonstrate the no-terminal path, supported API authentication, event handling, cancellation, and viable TeX installation on Windows. |
+| 0: Runtime and startup spike | Headless backend, separate/built frontend startup, SDK connection, one structured evaluation, one UI question, restricted tools, real stock-template compile/preview | Demonstrate documented terminal startup, supported API authentication, event handling, cancellation, and viable TeX installation. |
 | 1: Functional vertical slice | Profile import/confirmation -> pasted posting -> evaluation approval -> reviewed PDFs -> drafted record -> submission/outcome | One complete browser-driven application journey, persisted to canonical files and recoverable after restart. |
-| 2: MVP search and hardening | Portal adapters, dedup/ranking, job list, dashboard, durable approvals, backup/restore, stable application identity | All MVP acceptance scenarios, clean-machine packaging, and usability target pass. |
+| 2: MVP search and hardening | Portal adapters, dedup/ranking, job list, dashboard, durable approvals, backup/restore, stable application identity | All MVP acceptance scenarios, clean-machine source setup, and usability target pass. |
 | 3: Complete lifecycle UI | Interview prep, follow-ups, enrichment, learning, calibration, HTML export | Each new screen uses its canonical workflow and submitted-document/evidence boundaries. |
-| 4: Optional extensions | Gmail, Notion, vetted templates/portals, additional installers, local-model investigation | Explicit permissions, verified adapter compatibility, and no regression to the no-CLI core journey. |
+| 4: Optional extensions | Gmail, Notion, vetted templates/portals, local-model investigation | Explicit permissions, verified adapter compatibility, and no regression to the browser-driven core journey. |
 
 Do not estimate the full implementation from frontend screen count alone. The critical uncertainties are runtime permission/question handling, lossless editing of personalized files, stable archive identity, document toolchain distribution, and end-to-end verification.
 
 ### 16.1 Decisions resolved by this draft
 
 - Single-user local application, not hosted SaaS.
-- Browser interface backed by local services and a shortcut-based launcher.
+- Browser interface backed by a terminal-started, headless local backend; separate Vite or built-frontend modes.
+- Basic command-line setup is acceptable; Windows desktop packaging and Docker are out of scope.
 - Canonical workspace files retained as business records.
 - SQLite limited to operational state, identities, settings references, and read models.
 - Supported programmatic AI integration rather than a terminal transcript wrapper.
@@ -870,7 +875,7 @@ Do not estimate the full implementation from frontend screen count alone. The cr
 
 ### 16.2 Decisions to validate in Phase 0
 
-- Final desktop packaging technology and redistribution requirements for each bundled runtime, font, and PDF tool.
+- Supported OS/CPU combinations for source setup, the SDK runtime, OS keyring, fonts, and PDF tools.
 - The initial supported TeX distribution and guided installation path.
 - The exact SDK version and configuration needed for restricted tools, source loading, streaming, structured results, and UI questions.
 - Whether the proposed section-aware profile writer covers representative existing personalized workspaces without loss.

@@ -28,7 +28,7 @@ class Sessions:
     def bootstrap(self, token: str) -> tuple[str, str]:
         expiry = self.tokens.pop(token, 0)
         if expiry < time.monotonic():
-            raise AppError("launch_token_expired", "This launch link expired or was already used. Reopen the app from its launcher.", 401)
+            raise AppError("launch_token_expired", "This login link expired or was already used. Restart the backend and open the fresh link printed in its terminal.", 401)
         session_id, csrf = secrets.token_urlsafe(32), secrets.token_urlsafe(32)
         self.sessions = {key: item for key, item in self.sessions.items() if item[1] > time.monotonic()}
         if len(self.sessions) >= 16:
@@ -39,7 +39,7 @@ class Sessions:
     def verify(self, session_id: str | None, csrf: str | None = None, *, mutation: bool = False) -> str:
         record = self.sessions.get(session_id or "")
         if not record or record[1] < time.monotonic():
-            raise AppError("session_required", "Reopen the app from its desktop launcher to restore your local session.", 401)
+            raise AppError("session_required", "Open the login link printed in the backend terminal. If it expired, restart the backend for a fresh link.", 401)
         if mutation and (not csrf or not secrets.compare_digest(record[0], csrf)):
             raise AppError("csrf_required", "Refresh the app before making this change.", 403)
         return record[0]

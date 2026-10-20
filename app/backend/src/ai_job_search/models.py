@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date
+from pathlib import Path
 from typing import Annotated, Generic, Literal, TypeVar
 from uuid import uuid4
 
@@ -319,8 +320,15 @@ class PortalChange(Model):
 
 
 class WorkspaceInput(Model):
-    grant: str = Field(max_length=200)
+    path: str = Field(min_length=1, max_length=4096)
     create: bool = False
+
+    @field_validator("path")
+    @classmethod
+    def absolute_local_path(cls, value: str) -> str:
+        if "\x00" in value or not Path(value).is_absolute():
+            raise ValueError("Enter the full absolute path to a local workspace folder.")
+        return value
 
 
 class BackupInput(Model):

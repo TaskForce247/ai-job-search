@@ -1,7 +1,7 @@
 import { defineConfig } from '@playwright/test';
 
 export default defineConfig({
-  testDir: '.\\integration',
+  testDir: './integration',
   testMatch: '**/*.spec.ts',
   fullyParallel: false,
   workers: 1,
@@ -10,9 +10,9 @@ export default defineConfig({
   globalTimeout: 180_000,
   expect: { timeout: 15_000 },
   reporter: 'list',
-  outputDir: '.\\test-results\\real-api',
+  outputDir: './test-results/real-api',
   use: {
-    channel: 'msedge',
+    channel: process.platform === 'win32' ? 'msedge' : undefined,
     headless: true,
     viewport: { width: 1440, height: 1000 },
     trace: 'retain-on-failure',
