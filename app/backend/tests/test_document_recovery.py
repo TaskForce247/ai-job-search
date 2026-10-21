@@ -12,9 +12,11 @@ from ai_job_search.errors import AppError
 from ai_job_search.jobs import JobService
 from ai_job_search.models import (
     Decision,
+    DocumentBlock,
     DocumentContent,
     DocumentIssue,
     DocumentReviewCheckpoint,
+    DraftPair,
     GroundingReview,
     ReviewFinding,
     VisualReview,
@@ -24,6 +26,180 @@ from ai_job_search.workflows import WorkflowService
 
 BAD_WORDING = "I owned every Python service and trained the entire team."
 SUPPORTED_WORDING = "Built Python services for an internal reporting team."
+
+
+@pytest.mark.parametrize("stage", ["draft", "independent_review_1", "repair_2", "independent_review_3"])
+def test_boilerplate_revisions_pause_and_retain_substantive_drafts(confirmed, fixture_documents, stage):
+    class DestructiveRuntime(WordingRuntime):
+        def __init__(self):
+            super().__init__(repair=False)
+
+        async def generate(self, run_id, current_stage, data, *args, **kwargs):
+            result = await super().generate(run_id, current_stage, data, *args, **kwargs)
+            if current_stage == stage:
+                pair = result.revised if current_stage.startswith("independent_review_") else result
+                pair.cv.blocks = [DocumentBlock(text="Available upon request.")]
+                pair.cover_letter.blocks = [DocumentBlock(text="I look forward to hearing from you.")]
+            return result
+
+    runtime = DestructiveRuntime()
+    response, _, _ = approved_application(confirmed, runtime)
+    result = finish_preparation(confirmed, runtime, response)
+    assert result["status"] == "awaiting_user", result
+    approval = result["approvals"][0]
+    assert approval["kind"] == "document_review" and approval["choices"] == ["reject"]
+    assert {issue["document"] for issue in approval["proposal"]["issues"]} == {"cv", "cover_letter"}
+    assert not result["artifacts"] and not ApplicationService(confirmed).tracker()[1]
+    assert not any(call["stage"].startswith("visual_") for call in runtime.calls)
+    application = ApplicationService(confirmed).get(response["application_id"])
+    if stage != "draft":
+        assert len(application["documents"]["cv"]["content"]["blocks"]) == 2
+        assert application["documents"]["cover_letter"]["content"]["blocks"][1]["text"] == BAD_WORDING
+        assert len(approval["proposal"]["after"]["cv"]["blocks"]) == 2
+    with confirmed.store.connect() as connection:
+        assert not connection.execute(
+            "SELECT 1 FROM steps WHERE run_id=? AND stage LIKE 'compile_%'", (result["id"],),
+        ).fetchone()
+
+
+def test_completeness_rejects_large_deletions_even_with_substantive_content():
+    pair = DraftPair(
+        cv=DocumentContent(blocks=[DocumentBlock(kind="entry", text=SUPPORTED_WORDING)]),
+        cover_letter=DocumentContent(blocks=[DocumentBlock(text=SUPPORTED_WORDING)]),
+    )
+    original = pair.model_copy(deep=True)
+    for kind in ("cv", "cover_letter"):
+        getattr(original, kind).blocks[0].text = SUPPORTED_WORDING * 3
+    findings = DocumentService.completeness_findings(pair, original)
+    assert {finding.document for finding in findings} == {"cv", "cover_letter"}
+    assert all("more than half" in finding.message for finding in findings)
+    for kind in ("cv", "cover_letter"):
+        getattr(original, kind).blocks[0].text = SUPPORTED_WORDING * 2
+    assert not DocumentService.completeness_findings(pair, original)
+
+
+@pytest.mark.parametrize("kind", ["cv", "cover_letter"])
+@pytest.mark.parametrize("blocks", [
+    [],
+    [DocumentBlock(kind="heading", heading="Professional Experience")],
+    [DocumentBlock(text="Available upon request.")],
+    [DocumentBlock(text="Dear Hiring Manager,"), DocumentBlock(text="Kind regards,\nCandidate")],
+])
+def test_completeness_does_not_confuse_boilerplate_with_a_document(kind, blocks):
+    pair = DraftPair(
+        cv=DocumentContent(blocks=[DocumentBlock(kind="entry", text=SUPPORTED_WORDING)]),
+        cover_letter=DocumentContent(blocks=[DocumentBlock(text=SUPPORTED_WORDING)]),
+    )
+    getattr(pair, kind).blocks = blocks
+    findings = DocumentService.completeness_findings(pair)
+    assert len(findings) == 1 and findings[0].document == kind
+
+
+def test_incomplete_saved_drafts_cannot_reuse_a_successful_review(confirmed, fixture_documents):
+    runtime = FixtureRuntime()
+    response, _, _ = approved_application(confirmed, runtime)
+    assert finish_preparation(confirmed, runtime, response)["status"] == "succeeded"
+    applications = ApplicationService(confirmed)
+    original = applications.get(response["application_id"])
+    applications.save_content(
+        "incomplete-legacy-content", original["id"], "cv",
+        DocumentContent(blocks=[DocumentBlock(text="Available upon request.")]),
+        original["documents"]["cv"]["revision"],
+    )
+    current = applications.get(original["id"])
+    runtime = FixtureRuntime()
+    result = run_operation(confirmed, runtime, "documents", {
+        "application_id": current["id"], "expected_revision": current["revision"],
+        "_retry_of": response["preparation_run_id"],
+    })
+    assert result["status"] == "awaiting_user" and not result["artifacts"]
+    assert result["approvals"][0]["proposal"]["issues"][0]["document"] == "cv"
+    assert not runtime.calls
+
+
+def test_destructive_rewrite_is_not_offered_for_acceptance(confirmed, fixture_documents):
+    runtime = FixtureRuntime()
+    response, _, _ = approved_application(confirmed, runtime)
+    assert finish_preparation(confirmed, runtime, response)["status"] == "succeeded"
+    applications = ApplicationService(confirmed)
+    original = applications.get(response["application_id"])
+
+    class DestructiveRewriteRuntime(FixtureRuntime):
+        async def generate(self, run_id, stage, data, *args, **kwargs):
+            result = await super().generate(run_id, stage, data, *args, **kwargs)
+            if stage == "rewrite":
+                result.cv.blocks = [DocumentBlock(text="Available upon request.")]
+            return result
+
+    result = run_operation(confirmed, DestructiveRewriteRuntime(), "documents", {
+        "application_id": original["id"], "expected_revision": original["revision"],
+        "instruction": "Tighten the wording.",
+    })
+    assert result["status"] == "awaiting_user" and not result["artifacts"]
+    approval = result["approvals"][0]
+    assert approval["kind"] == "document_review" and approval["choices"] == ["reject"]
+    assert applications.get(original["id"])["documents"] == original["documents"]
+
+
+def test_explicit_rewrite_can_propose_recovery_of_an_incomplete_saved_draft(confirmed, fixture_documents):
+    runtime = FixtureRuntime()
+    response, _, _ = approved_application(confirmed, runtime)
+    assert finish_preparation(confirmed, runtime, response)["status"] == "succeeded"
+    applications = ApplicationService(confirmed)
+    original = applications.get(response["application_id"])
+    complete_pair = DraftPair.model_validate({
+        kind: document["content"] for kind, document in original["documents"].items()
+    })
+    applications.save_content(
+        "incomplete-cv", original["id"], "cv",
+        DocumentContent(blocks=[DocumentBlock(text="Available upon request.")]),
+        original["documents"]["cv"]["revision"],
+    )
+    current = applications.get(original["id"])
+
+    class RecoveryRuntime(FixtureRuntime):
+        async def generate(self, run_id, stage, data, *args, **kwargs):
+            if stage == "rewrite":
+                return complete_pair.model_copy(deep=True)
+            return await super().generate(run_id, stage, data, *args, **kwargs)
+
+    result = run_operation(confirmed, RecoveryRuntime(), "documents", {
+        "application_id": current["id"], "expected_revision": current["revision"],
+        "instruction": "Rebuild the full CV from my supported profile.",
+    })
+    assert result["status"] == "awaiting_user"
+    approval = result["approvals"][0]
+    assert approval["kind"] == "document_rewrite" and approval["choices"] == ["approve", "reject"]
+    assert approval["proposal"]["after"] == complete_pair.model_dump(mode="json")
+    assert applications.get(original["id"])["documents"] == current["documents"]
+    assert not result["artifacts"]
+
+
+@pytest.mark.parametrize("failed_check", ["mechanical", "visual"])
+def test_failed_pdf_checks_do_not_expose_unpublished_downloads(
+    confirmed, fixture_documents, monkeypatch, failed_check,
+):
+    class FailedVisualRuntime(FixtureRuntime):
+        async def generate(self, run_id, stage, data, *args, **kwargs):
+            result = await super().generate(run_id, stage, data, *args, **kwargs)
+            if failed_check == "visual" and stage.startswith("visual_"):
+                return VisualReview(passed=False, findings=["Synthetic visual defect."])
+            return result
+
+    if failed_check == "mechanical":
+        monkeypatch.setattr(DocumentService, "verify", lambda *args: (
+            [{"id": "text", "status": "fail", "message": "Synthetic missing body text."}], "", [],
+        ))
+    runtime = FailedVisualRuntime()
+    response, _, _ = approved_application(confirmed, runtime)
+    result = finish_preparation(confirmed, runtime, response)
+    assert result["status"] == "awaiting_user" and not result["artifacts"]
+    application = ApplicationService(confirmed).get(response["application_id"])
+    assert not application["published"] and not ApplicationService(confirmed).tracker()[1]
+    with confirmed.store.connect() as connection:
+        assert not connection.execute(
+            "SELECT 1 FROM artifacts WHERE run_id=?", (result["id"],),
+        ).fetchone()
 
 
 class WordingRuntime(FixtureRuntime):

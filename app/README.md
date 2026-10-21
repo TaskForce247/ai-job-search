@@ -145,6 +145,12 @@ claims are independently verified before the final factual gate; assessment
 wording warnings remain separate from the actual documents. Compilation and
 rendered-page inspection must still pass before PDFs are considered verified.
 
+Document preparation rejects boilerplate-only drafts and AI revisions that
+remove more than half of the draft's body text. These stop as **Needs review**
+with the last substantive draft retained, rather than compiling an empty
+application. Intermediate compilation files stay local; downloadable PDFs are
+registered only after both documents pass all required checks.
+
 The workspace shows the recorded API cost across document attempts and the
 configured limit for the next operation. Acceptance and continuation can still
 use the AI connection; interrupted requests may have unrecorded provider charges.

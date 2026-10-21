@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import NotRequired, TypedDict
 
 from .errors import AppError
-from .models import DocumentContent, DraftPair, Profile
+from .models import DocumentContent, DocumentIssue, DraftPair, Profile
 from .policy import load_helper
 from .processes import command
 from .storage import digest
@@ -220,6 +220,41 @@ class DocumentService:
         self.resources = resources
         self.pdf_helper = load_helper(resources, "verify_pdf")
         self.layout_helper = load_helper(resources, "verify_layout")
+
+    @staticmethod
+    def completeness_findings(pair: DraftPair, previous: DraftPair | None = None) -> list[DocumentIssue]:
+        findings = []
+        for kind in ("cv", "cover_letter"):
+            content = getattr(pair, kind)
+
+            def body_text(document: DocumentContent) -> str:
+                return " ".join(
+                    " ".join([block.text, *(bullet.text for bullet in block.bullets)]).strip()
+                    for block in document.blocks if block.kind != "heading"
+                ).strip()
+
+            body = body_text(content)
+            substantive = any(
+                block.kind in (("entry", "bullet") if kind == "cv" else ("paragraph", "bullet"))
+                and len(" ".join([block.text, *(bullet.text for bullet in block.bullets)]).strip()) >= 40
+                for block in content.blocks
+            )
+            if not substantive:
+                findings.append(DocumentIssue(
+                    document=kind,
+                    message=f"The {kind} is incomplete: substantive candidate content is missing. "
+                            "Headings, greetings, references and sign-offs alone are not an application.",
+                    suggestion="Restore the supported experience and role-specific body from the full draft.",
+                ))
+            elif previous and len(body) < len(body_text(getattr(previous, kind))) / 2:
+                # Large deletions require human review even when the remaining claims are true.
+                findings.append(DocumentIssue(
+                    document=kind,
+                    message=f"The proposed {kind} revision removes more than half of the draft's body text. "
+                            "The last substantive draft has been retained for review.",
+                    suggestion="Correct unsupported wording without deleting the supported application content.",
+                ))
+        return findings
 
     @staticmethod
     def evidence_findings(pair: DraftPair, valid_ids: set[str]) -> list[EvidenceFinding]:
