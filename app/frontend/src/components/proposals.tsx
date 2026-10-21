@@ -114,10 +114,12 @@ export function EvaluationView({ value }: { value: Record<string, unknown> }) {
   </div>;
 }
 
-export function DocumentIssues({ issues, evidence, onEditIssue, disabled = false }: {
+export function DocumentIssues({ issues, evidence, onEditIssue, onGenerateEdits, disabled = false, generateEditsDisabled = false }: {
   issues: unknown; evidence?: unknown;
   onEditIssue?: (kind?: DocumentKind, blockId?: string) => void;
+  onGenerateEdits?: () => void;
   disabled?: boolean;
+  generateEditsDisabled?: boolean;
 }) {
   if (!Array.isArray(issues) || !issues.length) return null;
   const sources = Array.isArray(evidence) ? evidence.map(asObject) : [];
@@ -140,9 +142,12 @@ export function DocumentIssues({ issues, evidence, onEditIssue, disabled = false
       {typeof issue.suggestion === 'string' && issue.suggestion && <div><h4>Suggested correction</h4><p>{issue.suggestion}</p></div>}
       {issue.needs_confirmation === true && <p className="hint">A genuine fact needs your confirmation. The app has not added it to your Profile.
         {' '}<Link to="/profile">Review and confirm Profile facts</Link>, then reassess the role, or remove the uncertain claim from the draft.</p>}
+      <div className="actions">
+      {onGenerateEdits && <Button variant="secondary" disabled={disabled || generateEditsDisabled} onClick={onGenerateEdits}>Generate AI edits</Button>}
       {onEditIssue && <Button variant="secondary" disabled={disabled} onClick={() =>
         onEditIssue(kind, typeof issue.block_id === 'string' ? issue.block_id : undefined)}>
         {kind && issue.block_id ? 'Edit this sentence' : 'Edit draft manually'}</Button>}
+      </div>
     </section>;
   })}</section>;
 }
@@ -167,9 +172,11 @@ function RewriteComparison({ before, after, correction = false }: {
   </div>;
 }
 
-export function ProposalView({ proposal, kind, onEditIssue }: {
+export function ProposalView({ proposal, kind, onEditIssue, onGenerateEdits, disabled = false }: {
   proposal: Record<string, unknown>; kind: string;
   onEditIssue?: (kind?: DocumentKind, blockId?: string) => void;
+  onGenerateEdits?: () => void;
+  disabled?: boolean;
 }) {
   const before = asObject(proposal.before);
   const after = asObject(proposal.after);
@@ -177,7 +184,8 @@ export function ProposalView({ proposal, kind, onEditIssue }: {
     Array.isArray(asObject(before[name]).blocks) && Array.isArray(asObject(after[name]).blocks));
   if (kind.includes('document_correction') && documentPair) {
     return <div className="stack">
-      <DocumentIssues issues={proposal.issues} evidence={proposal.evidence} onEditIssue={onEditIssue} />
+      <DocumentIssues issues={proposal.issues} evidence={proposal.evidence} onEditIssue={onEditIssue}
+        onGenerateEdits={onGenerateEdits} generateEditsDisabled={disabled} />
       <RewriteComparison before={before} after={after} correction />
       <p className="hint">Accepting applies this revision and continues remaining checks. It does not change Profile facts or submit an application. Remaining AI-backed checks may incur charges.</p>
     </div>;
@@ -185,10 +193,11 @@ export function ProposalView({ proposal, kind, onEditIssue }: {
   if (kind.includes('document_review')) {
     return <div className="stack">
       <Alert tone="warning" title="Draft saved · needs your review">
-        Automatic correction reached its limit or needs a genuine fact clarified. Read the issues, edit and save your draft,
-        then resume checks. Unsupported claims remain unverified.
+        Automatic correction stopped or needs a genuine fact clarified. Generate a new AI edit proposal, or edit and save
+        your draft manually, then resume checks. AI edits require your acceptance and cannot confirm missing facts.
       </Alert>
-      <DocumentIssues issues={proposal.issues} evidence={proposal.evidence} onEditIssue={onEditIssue} />
+      <DocumentIssues issues={proposal.issues} evidence={proposal.evidence} onEditIssue={onEditIssue}
+        onGenerateEdits={onGenerateEdits} generateEditsDisabled={disabled} />
       {documentPair && <details><summary>Compare the saved draft with the latest unverified AI revision</summary>
         <RewriteComparison before={before} after={after} /></details>}
     </div>;

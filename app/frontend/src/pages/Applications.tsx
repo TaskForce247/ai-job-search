@@ -7,6 +7,7 @@ import type { ApiSchema, Application, DocumentKind, DocumentView, Page, ProfileV
 import { outcomeStatuses } from '../types';
 import { DocumentChecks, DocumentEditor, isVerifiedDocument } from '../components/DocumentEditor';
 import { AIReadinessNote } from '../components/SetupControls';
+import { RunFailure } from '../components/RunFailure';
 import { DocumentIssues, EvaluationView } from '../components/proposals';
 import { Alert, Badge, Button, Empty, ErrorPanel, ExternalLink, Field, formatDate, humanize, Loading, Modal, PageHeader, Pager, Panel, safeUrl, today } from '../components/ui';
 import { ApprovalCard, RunActions } from './Activity';
@@ -218,7 +219,7 @@ export function ApplicationDetailPage() {
     if (!application) throw new Error('Wait for the application to finish loading.');
     return api<RunAccepted>(`/applications/${encodeURIComponent(id)}/document-runs`, {
       method: 'POST', body: {
-        expected_revision: application.revision, instruction: requestedInstruction,
+        expected_revision: application.revision, instruction: requestedInstruction, repair: false,
         ...(!requestedInstruction ? { resume_from: lastRunId ?? null } : {}),
       } satisfies ApiSchema<'DocumentRunInput'>,
     });
@@ -227,6 +228,27 @@ export function ApplicationDetailPage() {
         'Remaining checks queued. Saved drafts are retained; only unchanged, successful review checkpoints can be reused. PDFs are not ready until verification passes.');
       setInstruction('');
     });
+  const pdfAction = useAction((documentKind: DocumentKind) => {
+    if (!application) throw new Error('Wait for the application to finish loading.');
+    return api<RunAccepted>(`/applications/${encodeURIComponent(id)}/documents/${documentKind}/pdf-runs`, {
+      method: 'POST', body: { expected_revision: application.revision } satisfies ApiSchema<'DocumentPdfInput'>,
+    });
+  }, (run) => queued(run, 'Draft PDF queued locally. No AI call or content changes; the PDF will be marked unverified.'));
+  const pdfRunId = (pdfAction.variables === kind ? pdfAction.data?.run_id : undefined) ??
+    activity.allRuns.find((run) => run.kind === 'document_pdf' && run.input.application_id === id && run.input.kind === kind)?.id;
+  const pdfRun = useApiQuery<Run>(['run', pdfRunId], `/runs/${encodeURIComponent(pdfRunId ?? '')}`, {
+    enabled: !!pdfRunId,
+    refetchInterval: (query) => query.state.data && isActiveRun(query.state.data) ? 2_000 : false,
+  });
+  const repairAction = useAction(() => {
+    if (!application) throw new Error('Wait for the application to finish loading.');
+    return api<RunAccepted>(`/applications/${encodeURIComponent(id)}/document-runs`, {
+      method: 'POST', body: { expected_revision: application.revision, instruction: '', repair: true } satisfies ApiSchema<'DocumentRunInput'>,
+    });
+  }, (run) => {
+    setChecksOpen(true);
+    queued(run, 'AI edits queued for the failed checks. Review and accept the before-and-after proposal before your saved drafts change. API charges may apply.');
+  });
   useEffect(() => {
     if (application && !application.documents.cv && application.documents.cover_letter && kind === 'cv' && !dirty) setKind('cover_letter');
   }, [application, kind, dirty]);
@@ -234,7 +256,9 @@ export function ApplicationDetailPage() {
   if (applicationQuery.error) return <ErrorPanel error={applicationQuery.error} retry={() => void applicationQuery.refetch()} />;
   if (!application) return null;
   const view = document.data ?? application.documents[kind];
-  const runBusy = ['queued', 'running'].includes(relatedRun?.status ?? lastRun.data?.status ?? '');
+  const runBusy = ['queued', 'running'].includes(relatedRun?.status ?? lastRun.data?.status ?? '') ||
+    activity.allRuns.some((run) => run.kind === 'document_pdf' && run.input.application_id === id && ['queued', 'running'].includes(run.status)) ||
+    ['queued', 'running'].includes(pdfRun.data?.status ?? '') || pdfAction.isPending || repairAction.isPending || documentsAction.isPending;
   const pending = lastRun.data?.approvals.filter((approval) => approval.status === 'pending') ?? [];
   const hasPair = !!application.documents.cv && !!application.documents.cover_letter;
   const verified = hasPair && !dirty && Object.values(application.documents).every((value) => value && isVerifiedDocument(value));
@@ -243,6 +267,8 @@ export function ApplicationDetailPage() {
     .includes(lastRun.data?.error_code ?? '');
   const needsReview = pending.length > 0 || issues.length > 0 || legacyContentFailure;
   const currentProposal = pending.some((approval) => approval.proposal.expected_revision === application.revision);
+  const editProposalPending = pending.some((approval) => approval.kind === 'document_rewrite');
+  const editsDisabled = dirty || !hasPair || runBusy || editProposalPending;
   function choose(next: DocumentKind) {
     setChecksOpen(false);
     if (next === kind) return;
@@ -275,6 +301,22 @@ export function ApplicationDetailPage() {
       <p className="hint">Resume checks may use your configured AI connection
         {typeof application.next_run_limit_usd === 'number' ? `, with your existing $${application.next_run_limit_usd.toFixed(2)} limit for the next operation` : ' and spending limit'}.
         It reuses completed reviews only when the document, profile, posting and policy still match.</p>
+      <div className="actions">
+        <Button variant="secondary" disabled={dirty || !hasDocument || runBusy} busy={pdfAction.isPending}
+          onClick={() => pdfAction.mutate(kind)}>Generate PDF</Button>
+        {!dirty && view?.draft_pdf_artifact_id && !view.draft_pdf_stale &&
+          <a className="button button-secondary" href={artifactUrl(view.draft_pdf_artifact_id)} download>Download draft PDF (unverified)</a>}
+      </div>
+      <p className="hint">Generate PDF compiles the selected saved document locally without AI or changing its text.
+        The download is marked UNVERIFIED DRAFT; failed checks do not block this preview or become passes.</p>
+      <ErrorPanel error={pdfAction.error} />
+      <ErrorPanel error={pdfRun.error} retry={() => void pdfRun.refetch()} />
+      {pdfRun.data && <section aria-label="Draft PDF generation" className="stack">
+        <div className="actions"><Badge value={pdfRun.data.status} /><span>{pdfRun.data.message}</span></div>
+        <RunFailure run={pdfRun.data} />
+        <RunActions run={pdfRun.data} />
+      </section>}
+      <ErrorPanel error={repairAction.error} />
       {typeof application.preparation_cost_usd === 'number' && <p className="hint">
         Recorded document API cost: <strong>${application.preparation_cost_usd.toFixed(2)}</strong>
         {typeof application.preparation_attempts === 'number' && ` across ${application.preparation_attempts} ${application.preparation_attempts === 1 ? 'attempt' : 'attempts'}`}.
@@ -318,12 +360,17 @@ export function ApplicationDetailPage() {
             The saved draft changed after this proposal. Its approval is disabled. Resume checks to use your saved edits instead.
           </Alert>}
           <ApprovalCard approval={approval} runKind="documents" disabled={dirty || approval.proposal.expected_revision !== application.revision}
-            onEditIssue={editFinding} />
+            onEditIssue={editFinding}
+            onGenerateEdits={() => repairAction.mutate()} generateEditsDisabled={editsDisabled} />
         </div>)}
-        {!pending.length && <DocumentIssues issues={issues} evidence={profile.data?.evidence} onEditIssue={editFinding} />}
+        {!pending.length && <DocumentIssues issues={issues} evidence={profile.data?.evidence} onEditIssue={editFinding}
+          onGenerateEdits={() => repairAction.mutate()} disabled={runBusy} generateEditsDisabled={editsDisabled} />}
         {Object.entries(application.documents).map(([name, value]) => value && <section key={name}>
-          <h3>{name === 'cv' ? 'CV' : 'Cover letter'}</h3><DocumentChecks view={value} stale={value.stale || dirty} />
+          <h3>{name === 'cv' ? 'CV' : 'Cover letter'}</h3><DocumentChecks view={value} stale={value.stale || dirty}
+            onGenerateEdits={() => repairAction.mutate()} disabled={editsDisabled} />
         </section>)}
+        <p className="hint">AI edits use the failed checks and confirmed profile evidence. They may incur API charges and
+          always require your acceptance before replacing saved text. Missing facts are never confirmed by AI.</p>
       </section>}
       <details className="rewrite-panel"><summary>Request a targeted rewrite</summary>
         <form className="stack" onSubmit={(event) => { event.preventDefault(); if (instruction.trim()) documentsAction.mutate(instruction); }}>
@@ -333,7 +380,7 @@ export function ApplicationDetailPage() {
             <textarea id="rewrite-instruction" value={instruction} required rows={3} maxLength={20_000}
               onChange={(event) => setInstruction(event.target.value)} /></Field>
           <div><Button variant="secondary" type="submit" busy={documentsAction.isPending}
-            disabled={!instruction.trim() || dirty || !hasDocument || runBusy || currentProposal}>Request targeted rewrite</Button></div>
+            disabled={!instruction.trim() || dirty || !hasDocument || runBusy || editProposalPending}>Request targeted rewrite</Button></div>
         </form>
       </details>
     </Panel>

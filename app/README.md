@@ -146,10 +146,32 @@ wording warnings remain separate from the actual documents. Compilation and
 rendered-page inspection must still pass before PDFs are considered verified.
 
 Document preparation rejects boilerplate-only drafts and AI revisions that
-remove more than half of the draft's body text. These stop as **Needs review**
-with the last substantive draft retained, rather than compiling an empty
-application. Intermediate compilation files stay local; downloadable PDFs are
-registered only after both documents pass all required checks.
+remove more than half of the draft's body text. An incomplete saved draft stops
+as **Needs review**. An incomplete AI revision triggers one fresh response using
+the full input drafts and explicit preservation instructions. This extra call
+is recorded and counts toward the run's spending limit. If it is still incomplete,
+the run stops with an **AI output failure**, not a finding against the saved draft.
+Document stages use their own output schema and must return both full documents,
+including unchanged blocks; an empty array is not a no-change signal. Saved
+drafts remain intact when a revision is rejected. Intermediate compilation files stay local; downloadable PDFs are
+registered by the verified preparation workflow only after both documents pass
+all required checks.
+
+**Generate PDF** is a separate local-only action for the selected saved document.
+It compiles the text as-is without an AI call, adds an **UNVERIFIED DRAFT** banner
+on every page, and makes **Download draft PDF (unverified)** available. It works
+while content review is pending and never marks checks passed, publishes the
+application, or changes saved text. A changed draft or profile makes that preview
+out of date. Compilation errors remain visible; an incomplete or unextractable
+render is not presented as a successful download. Use **Resume checks** for the
+full factual, layout and rendered-page verification path.
+
+Failed content and PDF checks offer **Generate AI edits**, alongside manual
+editing. This explicitly starts a billable AI proposal using the recorded
+findings and confirmed profile evidence, even when a content-review decision is
+pending. Review its before/after comparison and accept or reject it: generating
+edits alone never replaces the saved drafts or confirms missing facts. Existing
+rewrite proposals still need a decision before another can be started.
 
 The workspace shows the recorded API cost across document attempts and the
 configured limit for the next operation. Acceptance and continuation can still
@@ -226,15 +248,23 @@ then record the actual submission date. Submitted document revisions are frozen.
 | Full PDF layout verification | Poppler `pdftotext` and `pdfinfo` |
 
 Install tools on `PATH` **before starting the backend**, or restart it after
-installation. Stock templates need the packages listed in
-[minimal TeX setup](../SETUP.md#minimal-tex-install-tinytexbasictex), including
-`moderncv`, `fontawesome5`, `fontspec`, and `needspace`. Fonts for the cover
+installation. The TeX packages the stock templates need are listed once in
+[`tex-requirements.txt`](../tex-requirements.txt). Install any that are missing,
+and confirm both templates compile, with one command from the repository root:
+
+```bash
+python tools/install_tex_packages.py          # add --check to only report missing packages
+```
+
+It uses MiKTeX (user mode, no admin) or TeX Live's `tlmgr`. Fonts for the cover
 letter are already in the repository. Compilation never enables shell escape
 or opens hidden package-install dialogs.
 
-Settings shows actual tool readiness. Existing consent-based Windows dependency
-repair is still available where supported; on macOS/Linux use the providers'
-installation instructions. Finding compiler executables is not proof that a
+Settings shows actual tool readiness, including missing template packages, which
+are found with `kpsewhich`. On Windows, **Repair** under Document tools installs
+exactly the missing packages, refreshes MiKTeX's file database and formats, and
+succeeds only if every package is then detected. On macOS/Linux use the script
+above or the providers' installation instructions. Finding compiler executables is not proof that a
 document passed compilation or verification. Failed and skipped checks remain
 visible.
 

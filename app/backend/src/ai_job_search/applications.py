@@ -300,6 +300,24 @@ class ApplicationService:
                     "AND steps.status='succeeded' AND json_extract(steps.output_json,'$.documents_hash')=? LIMIT 1",
                     (application_id, documents_hash),
                 ).fetchone()
+                for kind, document in application["documents"].items():
+                    draft = connection.execute(
+                        "SELECT result_json FROM runs WHERE kind='document_pdf' AND status='succeeded' "
+                        "AND json_extract(input_json,'$.application_id')=? AND json_extract(input_json,'$.kind')=? "
+                        "ORDER BY created_at DESC,id DESC LIMIT 1", (application_id, kind),
+                    ).fetchone()
+                    if draft:
+                        result = json.loads(draft["result_json"])
+                        artifact = self.workspace.store.artifact(result["artifact_id"])
+                        hashes = result["profile_hashes"]
+                        document.update(
+                            draft_pdf_artifact_id=artifact["id"],
+                            draft_pdf_stale=(
+                                result["document_revision"] != document["revision"]
+                                or self.workspace.snapshot(list(hashes)) != hashes
+                                or self.workspace.hash(artifact["relative_path"]) != artifact["hash"]
+                            ),
+                        )
             settings, _ = self.workspace.store.settings()
             latest_result = json.loads(latest["result_json"] or "null") if latest else None
             issues = latest_result.get("issues", []) if isinstance(latest_result, dict) else []

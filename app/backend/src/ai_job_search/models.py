@@ -321,6 +321,11 @@ class DocumentRunInput(Model):
     expected_revision: Revision
     instruction: Text = ""
     resume_from: str | None = Field(default=None, max_length=100)
+    repair: bool = False
+
+
+class DocumentPdfInput(Model):
+    expected_revision: Revision
 
 
 class ApplicationInput(Model):
@@ -408,6 +413,8 @@ class DocumentView(Model):
     checks: list[Check]
     pdf_artifact_id: str | None = None
     source_artifact_id: str | None = None
+    draft_pdf_artifact_id: str | None = None
+    draft_pdf_stale: bool = False
     keyword_coverage: list[dict[str, JsonValue]] = Field(default_factory=list)
     model_config = ConfigDict(extra="allow")
 

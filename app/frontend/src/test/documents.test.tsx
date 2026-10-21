@@ -119,6 +119,25 @@ describe('local PDF preview and document revisions', () => {
     expect(screen.getByText('PDF is out of date')).toBeVisible();
   });
 
+  it('labels a local draft PDF as unverified even when its text matches the saved draft', async () => {
+    fetchFixtures({ '/api/v1/artifacts/draft-pdf': () => new Response('PDF bytes') });
+    renderApp(<PdfPreview artifactId="draft-pdf" stale={false} content={documentFixture.content} unverified />);
+    expect(await screen.findByRole('img', { name: /PDF page 1 of 1/ })).toBeVisible();
+    expect(screen.getByText('Unverified draft PDF')).toBeVisible();
+    expect(screen.getByRole('link', { name: 'Download draft PDF (unverified)' })).toBeVisible();
+    expect(screen.queryByRole('link', { name: 'Download current PDF' })).not.toBeInTheDocument();
+  });
+
+  it('offers AI edits for failed PDF checks but does not run them automatically', async () => {
+    const edits = vi.fn();
+    renderApp(<DocumentChecks view={{ ...documentFixture, checks: [{
+      id: 'layout', label: 'Layout', status: 'fail', message: 'Signature overflows to page two.',
+    }] }} stale={false} onGenerateEdits={edits} />);
+    expect(edits).not.toHaveBeenCalled();
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Generate AI edits for failed checks' }));
+    expect(edits).toHaveBeenCalledOnce();
+  });
+
   it('provides a text alternative when PDF rendering fails', async () => {
     fetchFixtures({ '/api/v1/artifacts/pdf-bad': () => new Response('Bad bytes') });
     pdfMocks.getDocument.mockImplementation(() => ({ promise: Promise.reject(new Error('Damaged PDF')), destroy: vi.fn().mockResolvedValue(undefined) }));

@@ -435,6 +435,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/applications/{application_id}/documents/{kind}/pdf-runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Document Pdf Run */
+        post: operations["document_pdf_run_api_v1_applications__application_id__documents__kind__pdf_runs_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/applications/{application_id}/submissions": {
         parameters: {
             query?: never;
@@ -972,6 +989,11 @@ export interface components {
              */
             needs_confirmation: boolean;
         };
+        /** DocumentPdfInput */
+        DocumentPdfInput: {
+            /** Expected Revision */
+            expected_revision: string;
+        };
         /** DocumentRunInput */
         DocumentRunInput: {
             /** Expected Revision */
@@ -983,6 +1005,11 @@ export interface components {
             instruction: string;
             /** Resume From */
             resume_from?: string | null;
+            /**
+             * Repair
+             * @default false
+             */
+            repair: boolean;
         };
         /** DocumentView */
         DocumentView: {
@@ -997,6 +1024,13 @@ export interface components {
             pdf_artifact_id?: string | null;
             /** Source Artifact Id */
             source_artifact_id?: string | null;
+            /** Draft Pdf Artifact Id */
+            draft_pdf_artifact_id?: string | null;
+            /**
+             * Draft Pdf Stale
+             * @default false
+             */
+            draft_pdf_stale: boolean;
             /** Keyword Coverage */
             keyword_coverage?: {
                 [key: string]: components["schemas"]["JsonValue"];
@@ -2451,6 +2485,42 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["DocumentRunInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Queued"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    document_pdf_run_api_v1_applications__application_id__documents__kind__pdf_runs_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                application_id: string;
+                kind: "cv" | "cover_letter";
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DocumentPdfInput"];
             };
         };
         responses: {

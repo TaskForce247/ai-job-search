@@ -8,7 +8,7 @@ import threading
 from contextlib import asynccontextmanager
 from datetime import date, timedelta
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Literal
 from uuid import NAMESPACE_URL, uuid4, uuid5
 
 from fastapi import FastAPI, File, Form, Query, Request, UploadFile
@@ -32,6 +32,7 @@ from .models import (
     BootstrapInput,
     Decision,
     DocumentEdit,
+    DocumentPdfInput,
     DocumentRunInput,
     DocumentView,
     EvaluationInput,
@@ -499,9 +500,15 @@ def create_app(config: Config | None = None, *, on_shutdown: Callable[[], None] 
             application = ApplicationService(ws()).get(application_id)
             if application["revision"] != data.expected_revision:
                 raise AppError("revision_conflict", "The application changed. Reload before continuing its checks.", 409)
+            if data.repair:
+                inputs["repair_findings"] = [
+                    *application.get("content_issues", []),
+                    *[{"document": kind, **check} for kind, document in application["documents"].items()
+                      for check in document.get("checks", []) if check["status"] != "pass"],
+                ]
             with ws().store.connect() as connection:
                 active = connection.execute(
-                    "SELECT id FROM runs WHERE kind='documents' AND status IN ('queued','running') "
+                    "SELECT id FROM runs WHERE kind IN ('documents','document_pdf') AND status IN ('queued','running') "
                     "AND json_extract(input_json,'$.application_id')=? LIMIT 1", (application_id,),
                 ).fetchone()
             if active:
@@ -518,7 +525,8 @@ def create_app(config: Config | None = None, *, on_shutdown: Callable[[], None] 
                 pending = [approval for approval in source["approvals"] if approval["status"] == "pending"]
                 if any(approval["kind"] not in ("document_correction", "document_review") for approval in pending):
                     raise AppError("pending_document_decision", "Accept or reject the existing rewrite before starting another check.", 409)
-                if pending and any(approval["proposal"]["expected_revision"] == application["revision"] for approval in pending):
+                if (pending and not (data.instruction.strip() or data.repair)
+                        and any(approval["proposal"]["expected_revision"] == application["revision"] for approval in pending)):
                     raise AppError("document_correction_required", "Accept the proposed corrections, or save your manual edits before resuming checks.", 409)
                 bundle = workflows().bundle(source["id"])
                 if bundle["hash"] != workflows().policy.bundle("apply")["hash"]:
@@ -529,9 +537,42 @@ def create_app(config: Config | None = None, *, on_shutdown: Callable[[], None] 
                 for approval in pending:
                     ws().store.record_decision(approval["id"], "reject", approval["revision"])
                 ws().store.finish(source["id"], {
-                    "application_id": application_id, "continued_as": queued, "manual_edits_preserved": True,
+                    "application_id": application_id, "continued_as": queued,
+                    "manual_edits_preserved": not bool(data.instruction.strip() or data.repair),
+                    "ai_edits_requested": bool(data.instruction.strip() or data.repair),
                 })
             return {"run_id": queued, "application_id": application_id}
+
+    @app.post(PREFIX + "/applications/{application_id}/documents/{kind}/pdf-runs", status_code=202, response_model=Queued)
+    def document_pdf_run(application_id: str, kind: Literal["cv", "cover_letter"], data: DocumentPdfInput, request: Request):
+        with ws().lock():
+            run_id = operation(request)
+            with ws().store.connect() as connection:
+                existing = connection.execute("SELECT id FROM runs WHERE id=?", (run_id,)).fetchone()
+            if existing:
+                saved = ws().store.run(run_id)
+                if (saved["kind"] != "document_pdf" or any(saved["input"].get(key) != value for key, value in {
+                    "application_id": application_id, "kind": kind, "expected_revision": data.expected_revision,
+                }.items())):
+                    raise AppError("idempotency_conflict", "This operation key was used for different PDF inputs.", 409)
+                return {"run_id": run_id, "application_id": application_id}
+            application = ApplicationService(ws()).get(application_id)
+            if application["revision"] != data.expected_revision:
+                raise AppError("revision_conflict", "The saved draft changed. Reload before generating its PDF.", 409)
+            if kind not in application["documents"]:
+                raise AppError("not_found", "Save this document before generating a PDF.", 404)
+            with ws().store.connect() as connection:
+                active = connection.execute(
+                    "SELECT id FROM runs WHERE kind IN ('documents','document_pdf') AND status IN ('queued','running') "
+                    "AND json_extract(input_json,'$.application_id')=? LIMIT 1", (application_id,),
+                ).fetchone()
+            if active:
+                raise AppError("operation_in_progress", "Document work is already in progress. Wait for it to stop before compiling.", 409)
+            workflows().enqueue(run_id, "document_pdf", {
+                "application_id": application_id, "kind": kind, "expected_revision": data.expected_revision,
+                "profile_revision": ProfileService(ws()).read().revision,
+            })
+            return {"run_id": run_id, "application_id": application_id}
 
     @app.post(PREFIX + "/applications/{application_id}/submissions", response_model=ApplicationView)
     def submit(application_id: str, data: SubmissionInput, request: Request):

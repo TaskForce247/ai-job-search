@@ -470,3 +470,10 @@ dialog::backdrop { background: #1b2d2760; backdrop-filter: blur(3px); }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; }
 }
+
+.failure-heading { font-size: .88rem; margin: 12px 0 4px; }
+.failure-facts { margin-top: 12px; }
+.failure-diagnostics { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 3fr); gap: 6px 14px; }
+.failure-diagnostics dt { font-weight: 600; }
+.failure-diagnostics dd { margin: 0; min-width: 0; }
+.failure-diagnostics ul { margin: 0; padding-left: 18px; }

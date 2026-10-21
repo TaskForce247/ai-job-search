@@ -8,8 +8,34 @@ from conftest import assessment
 from ai_job_search.errors import AppError
 from ai_job_search.models import Gate
 from ai_job_search.policy import Policy
-from ai_job_search.profile import MASTER_PATH, ProfileService, section
+from ai_job_search.profile import MASTER_PATH, ProfileService, label, section
 from ai_job_search.workspace import PROFILE_PATH
+
+
+@pytest.mark.parametrize("newline", ["\n", "\r\n"])
+def test_empty_identity_fields_do_not_capture_the_next_line(newline):
+    text = newline.join([
+        "- **Name:** Synthetic Candidate",
+        "- **GitHub:** ",
+        "- **Status:** Employed",
+        "- **Headline:**",
+        "",
+        "### Languages",
+        "| English | C2 |",
+    ])
+    assert label(text, "GitHub") == ""
+    assert label(text, "Headline") == ""
+    assert label(text, "Status") == "Employed"
+    assert label(text, "Name") == "Synthetic Candidate"
+
+
+def test_empty_github_does_not_corrupt_the_compiled_cv_header(confirmed):
+    profile = ProfileService(confirmed).read().data
+    assert profile.github == ""
+    from ai_job_search.documents import render_cv
+    from ai_job_search.models import DocumentContent
+    source = render_cv(profile, DocumentContent(), confirmed.resources)
+    assert "GitHub:" not in source and "**Status:**" not in source
 
 
 def test_crlf_sections_and_unknown_content_survive_confirmation(workspace, profile):

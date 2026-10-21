@@ -50,7 +50,7 @@ def replace_section(text: str, title: str, body: str, level: int = 2) -> str:
 
 
 def label(text: str, name: str) -> str:
-    match = re.search(rf"^\s*-?\s*\*\*{re.escape(name)}:\*\*\s*(.*)$", text, re.M)
+    match = re.search(rf"^[ \t]*-?[ \t]*\*\*{re.escape(name)}:\*\*[ \t]*([^\r\n]*)\r?$", text, re.M)
     return clean(match.group(1)) if match else ""
 
 

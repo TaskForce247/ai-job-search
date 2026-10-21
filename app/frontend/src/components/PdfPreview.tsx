@@ -58,8 +58,8 @@ function PdfPage({ pdf, number, width }: { pdf: PDFDocumentProxy; number: number
   </div>;
 }
 
-export function PdfPreview({ artifactId, stale, content }: {
-  artifactId?: string | null; stale: boolean; content: DocumentContent;
+export function PdfPreview({ artifactId, stale, content, unverified = false }: {
+  artifactId?: string | null; stale: boolean; content: DocumentContent; unverified?: boolean;
 }) {
   const container = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(560);
@@ -103,21 +103,24 @@ export function PdfPreview({ artifactId, stale, content }: {
 
   const current = !stale && loaded && loaded.id === artifactId ? loaded.pdf : undefined;
   return <div className="pdf-preview" ref={container}>
+    {unverified && artifactId && <Alert tone="warning" title="Unverified draft PDF">
+      This is a local rendering of saved text, not a verified application. Review it before use; factual and layout checks are separate.
+    </Alert>}
     {stale ? <Alert tone="warning" title="PDF is out of date">
-      Content has changed since the last compile. Save your edits, then choose “Resume checks.”
+      Content has changed since the last compile. Save your edits, then choose “Generate PDF.”
       The previous PDF is not a preview of your current edits.
-      {artifactId && <p><a href={artifactUrl(artifactId)} download>Download previous PDF (out of date)</a></p>}
+      {artifactId && <p><a href={artifactUrl(artifactId)} download>{unverified ? 'Download previous draft PDF (unverified, out of date)' : 'Download previous PDF (out of date)'}</a></p>}
     </Alert> : !artifactId ? <Alert title="No compiled PDF yet">
-      Save the document, then choose “Resume checks.” You can read and edit the text while you wait.
+      Save the document, then choose “Generate PDF.” You can read and edit the text while you wait.
     </Alert> : error ? <Alert tone="warning" title="PDF preview unavailable">
-      <p>{error}</p><p>Your document text is available below. <a href={artifactUrl(artifactId)} download>Download the PDF</a> to inspect it locally.</p>
+      <p>{error}</p><p>Your document text is available below. <a href={artifactUrl(artifactId)} download>{unverified ? 'Download draft PDF (unverified)' : 'Download the PDF'}</a> to inspect it locally.</p>
     </Alert> : current ? <>
       <p role="status" className="hint">Compiled PDF · {current.numPages} {current.numPages === 1 ? 'page' : 'pages'} · rendered locally</p>
       <div className="pdf-pages" role="region" tabIndex={0} aria-label="PDF pages. Scroll to see every page.">
         {Array.from({ length: Math.min(current.numPages, 50) }, (_, i) =>
         <PdfPage key={`${artifactId}-${i}`} pdf={current} number={i + 1} width={width} />)}</div>
       {current.numPages > 50 && <Alert tone="warning">Preview is limited to 50 pages. Download the PDF to inspect every page.</Alert>}
-      <a className="button button-secondary" href={artifactUrl(artifactId!)} download>Download current PDF</a>
+      <a className="button button-secondary" href={artifactUrl(artifactId!)} download>{unverified ? 'Download draft PDF (unverified)' : 'Download current PDF'}</a>
     </> : <Loading label="Rendering PDF on this computer…" />}
     <details className="accessible-document"><summary>Read document text (accessible alternative)</summary>
       <ReadDocument content={content} /></details>

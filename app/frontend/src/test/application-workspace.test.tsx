@@ -79,6 +79,17 @@ function setup(options: { manual?: boolean; stopped?: boolean; preparing?: boole
     '/api/v1/system/readiness': { ai_connected: true, privacy_consent: true },
     '/api/v1/runs/review-run': () => json(state.runs['review-run']),
     '/api/v1/runs/continued-run': () => json(state.runs['continued-run']),
+    '/api/v1/runs/pdf-run': () => json(state.runs['pdf-run']),
+    ...Object.fromEntries((['cv', 'cover_letter'] as const).map((kind) => [
+      `/api/v1/applications/application-1/documents/${kind}/pdf-runs`,
+      () => {
+        state.runs['pdf-run'] = {
+          ...runFixture, id: 'pdf-run', kind: 'document_pdf', status: 'queued', approvals: [],
+          input: { application_id: applicationFixture.id, kind }, result: null, error: null, error_code: null,
+        };
+        return json({ run_id: 'pdf-run', application_id: applicationFixture.id }, 202);
+      },
+    ])),
     '/api/v1/applications/application-1/document-runs': () => continueChecks(),
     '/api/v1/approvals/approval-1/decision': (init?: RequestInit) => {
       const decision = JSON.parse(String(init?.body));
@@ -111,6 +122,7 @@ describe('document-first application workspace', () => {
     expect(within(readable).getByText('Unverified draft')).toBeVisible();
     expect(state.runs['review-run'].status).toBe('running');
     expect(screen.getByRole('button', { name: 'Resume checks' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Generate PDF' })).toBeDisabled();
     expect(fetch.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false);
     expect(fetch.mock.calls.some(([url]) => String(url).includes('/artifacts/'))).toBe(false);
   });
@@ -165,6 +177,8 @@ describe('document-first application workspace', () => {
     await user.click(screen.getByRole('button', { name: 'Checks (1)' }));
     expect(screen.getByRole('button', { name: 'Accept corrections & continue' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Resume checks' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Generate PDF' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Generate AI edits' })).toBeDisabled();
     await user.click(screen.getByRole('button', { name: 'Edit this sentence' }));
     expect(body).toHaveFocus();
     expect(body).toHaveValue('My manually corrected reporting experience.');
@@ -181,7 +195,7 @@ describe('document-first application workspace', () => {
       String(url).endsWith('/document-runs') && init?.method === 'POST')).toBe(true));
     const request = fetch.mock.calls.find(([url, init]) => String(url).endsWith('/document-runs') && init?.method === 'POST');
     expect(JSON.parse(String(request?.[1]?.body))).toEqual({
-      expected_revision: 'application-r2', instruction: '', resume_from: 'review-run',
+      expected_revision: 'application-r2', instruction: '', resume_from: 'review-run', repair: false,
     });
     expect(state.application.documents.cv!.content.blocks[0].text).toBe('My manually corrected reporting experience.');
     expect(fetch.mock.calls.some(([url, init]) => String(url).includes('/approvals/') && init?.method === 'POST')).toBe(false);
@@ -195,6 +209,89 @@ describe('document-first application workspace', () => {
     expect(screen.queryByRole('button', { name: 'Accept corrections & continue' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Edit this sentence' })).toBeEnabled();
     expect(screen.getByRole('button', { name: 'Resume checks' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Generate AI edits' })).toBeEnabled();
+  });
+
+  it('generates a local draft PDF during pending review and exposes a clearly unverified download', async () => {
+    const { fetch, client, state } = setup({ manual: true });
+    const user = userEvent.setup();
+    await screen.findByRole('region', { name: 'Readable saved draft' });
+    await user.click(screen.getByRole('button', { name: 'Cover letter' }));
+    await user.click(screen.getByRole('button', { name: 'Generate PDF' }));
+    await screen.findByRole('region', { name: 'Draft PDF generation' });
+    const request = fetch.mock.calls.find(([url, init]) =>
+      String(url).endsWith('/documents/cover_letter/pdf-runs') && init?.method === 'POST');
+    expect(JSON.parse(String(request?.[1]?.body))).toEqual({ expected_revision: applicationFixture.revision });
+    expect(screen.getByRole('button', { name: 'Generate PDF' })).toBeDisabled();
+    state.runs['pdf-run'] = {
+      ...state.runs['pdf-run'], status: 'succeeded',
+      message: 'Draft PDF compiled locally.', result: { verified: false },
+    };
+    state.application.documents.cover_letter = {
+      ...state.application.documents.cover_letter!, draft_pdf_artifact_id: 'draft-pdf', draft_pdf_stale: false,
+    };
+    await act(async () => { await client.refetchQueries({ queryKey: ['runs'] }); });
+    const download = await screen.findByRole('link', { name: 'Download draft PDF (unverified)' });
+    expect(download).toHaveAttribute('href', '/api/v1/artifacts/draft-pdf');
+    expect(screen.queryByRole('link', { name: 'Download cover letter PDF' })).not.toBeInTheDocument();
+    expect(state.runs['review-run'].status).toBe('awaiting_user');
+    expect(state.application.published).toBe(false);
+    expect(fetch.mock.calls.some(([url, init]) =>
+      (String(url).endsWith('/document-runs') || String(url).includes('/approvals/')) && init?.method === 'POST')).toBe(false);
+    state.application.documents.cover_letter.draft_pdf_stale = true;
+    await act(async () => {
+      await client.refetchQueries({ queryKey: ['application'] });
+      await client.refetchQueries({ queryKey: ['document'] });
+    });
+    await waitFor(() => expect(screen.queryByRole('link', { name: 'Download draft PDF (unverified)' })).not.toBeInTheDocument());
+  });
+
+  it('reports PDF compilation failure without offering a success-shaped download', async () => {
+    const { client, state } = setup({ manual: true });
+    await screen.findByRole('region', { name: 'Readable saved draft' });
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Generate PDF' }));
+    await screen.findByRole('region', { name: 'Draft PDF generation' });
+    state.runs['pdf-run'] = {
+      ...state.runs['pdf-run'], status: 'failed', error: 'The document compiler could not finish.', error_code: 'tool_failed',
+    };
+    await act(async () => {
+      await client.refetchQueries({ queryKey: ['runs'] });
+      await client.refetchQueries({ queryKey: ['run', 'pdf-run'] });
+    });
+    expect(await screen.findByText('The document compiler could not finish.')).toBeVisible();
+    expect(screen.queryByRole('link', { name: 'Download draft PDF (unverified)' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Generate PDF' })).toBeEnabled();
+  });
+
+  it('requests AI edits directly from a failed check without auto-accepting a correction', async () => {
+    const { fetch, state } = setup({ manual: true });
+    const user = userEvent.setup();
+    await screen.findByRole('region', { name: 'Readable saved draft' });
+    await user.click(screen.getByRole('button', { name: 'Checks (1)' }));
+    await user.click(screen.getByRole('button', { name: 'Generate AI edits' }));
+    await waitFor(() => expect(fetch.mock.calls.some(([url, init]) =>
+      String(url).endsWith('/document-runs') && init?.method === 'POST')).toBe(true));
+    const request = fetch.mock.calls.find(([url, init]) => String(url).endsWith('/document-runs') && init?.method === 'POST');
+    expect(JSON.parse(String(request?.[1]?.body))).toEqual({
+      expected_revision: applicationFixture.revision, instruction: '', repair: true,
+    });
+    expect(state.application.documents.cv!.content.blocks[0].text).toBe(savedWording);
+    expect(fetch.mock.calls.some(([url, init]) => String(url).includes('/approvals/') && init?.method === 'POST')).toBe(false);
+  });
+
+  it('allows a targeted rewrite to resolve a pending content review', async () => {
+    const { fetch } = setup({ manual: true });
+    const user = userEvent.setup();
+    await screen.findByRole('region', { name: 'Readable saved draft' });
+    await user.click(screen.getByText('Request a targeted rewrite'));
+    await user.type(screen.getByLabelText('What should change?'), 'Restore the full supported application.');
+    await user.click(screen.getByRole('button', { name: 'Request targeted rewrite' }));
+    await waitFor(() => expect(fetch.mock.calls.some(([url, init]) =>
+      String(url).endsWith('/document-runs') && init?.method === 'POST')).toBe(true));
+    const request = fetch.mock.calls.find(([url, init]) => String(url).endsWith('/document-runs') && init?.method === 'POST');
+    expect(JSON.parse(String(request?.[1]?.body))).toEqual({
+      expected_revision: applicationFixture.revision, instruction: 'Restore the full supported application.', repair: false,
+    });
   });
 
   it('never labels a draft verified when a required check is skipped', () => {

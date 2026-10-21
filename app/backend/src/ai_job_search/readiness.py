@@ -14,18 +14,15 @@ from . import __version__
 from .config import data_home
 from .errors import AppError
 from .processes import command
-from .runtime import Credentials
+from .runtime import Credentials, _failure
+from .tex import TEX_PACKAGES, clear_cache, missing_tex_files, package_for
 from .workspace import Workspace
 
 BUN_VERSION = "1.3.14"
 BUN_ARCHIVE = "bun-windows-x64-baseline.zip"
 BUN_SHA256 = "538f9c846355d9e847b2671bc00c47da4229a0befb24df3282b739770f3b475f"
 WINDOWS_PACKAGES = {"tex": ("MiKTeX.MiKTeX", "25.12"), "pdf": ("oschwartz10612.Poppler", "25.07.0-0")}
-TEX_PACKAGES = (
-    "moderncv", "fontawesome5", "fontawesome6", "academicons", "import", "luatexbase", "luaotfload",
-    "pgf", "titlesec", "textpos", "xltxtra", "xunicode", "cite", "realscripts", "needspace",
-    "fontspec", "geometry", "hyperref", "xcolor", "fancyhdr",
-)
+__all__ = ["TEX_PACKAGES", "find_tool", "readiness", "repair"]
 
 
 def tool_directories(resources: Path) -> list[Path]:
@@ -57,9 +54,10 @@ def readiness(workspace: Workspace) -> dict:
     runtime_path = Path(claude_agent_sdk.__file__).parent / "_bundled"
     sdk_ready = runtime_path.is_dir() and any(path.is_file() and path.name.startswith("claude") for path in runtime_path.iterdir())
     tex_ready = all(find_tool(name, workspace.resources) for name in ("lualatex", "xelatex"))
+    missing_tex = missing_tex_files(workspace.resources) if tex_ready else None
     pdf_ready = all(find_tool(name, workspace.resources) for name in ("pdftotext", "pdfinfo"))
     winget_ready = os.name == "nt" and bool(shutil.which("winget"))
-    tex_repair_ready = os.name == "nt" and tex_ready and bool(find_tool("mpm", workspace.resources))
+    tex_repair_ready = os.name == "nt" and tex_ready and bool(tex_manager(workspace.resources))
     portals_ready = any(PortalService(workspace).executable(portal) for portal in ("freehire-search", "linkedin-search"))
     connected = Credentials.connected()
     with workspace.store.connect() as connection:
@@ -72,8 +70,8 @@ def readiness(workspace: Workspace) -> dict:
         {"id": "portals", "label": "Job source runtime", "status": "ready" if portals_ready else "setup_required",
          "description": "Reviewed portal CLIs only. Pasted postings work without Bun.",
          "repair_url": "https://bun.sh/", "can_install": os.name == "nt"},
-        {"id": "tex", "label": "Document tools (LuaLaTeX / XeLaTeX)", "status": "ready" if tex_ready else "setup_required",
-         "description": "LuaLaTeX and XeLaTeX are required. Missing packages are reported; compilation never opens package-install dialogs.",
+        {"id": "tex", "label": "Document tools (LuaLaTeX / XeLaTeX)", "status": "ready" if tex_ready and not missing_tex else "setup_required",
+         "description": tex_description(tex_ready, missing_tex),
          "repair_url": {"win32": "https://miktex.org/download", "darwin": "https://tug.org/mactex/"}.get(
              sys.platform, "https://tug.org/texlive/"),
          "can_install": winget_ready or tex_repair_ready},
@@ -142,12 +140,100 @@ def repair(workspace: Workspace, run_id: str, dependency: str) -> dict:
             "--accept-package-agreements", "--accept-source-agreements", "--disable-interactivity",
         ], directory, timeout=600)
     if dependency == "tex":
-        manager = find_tool("mpm", workspace.resources)
-        if not manager:
-            raise AppError("tex_package_manager_missing", "MiKTeX's package manager was not found. Use its repair link and reopen the app.", 409)
-        workspace.store.event(run_id, "install", {"message": "Installing the documented stock-template packages in MiKTeX user mode."})
-        command([manager, "--update-db"], directory, timeout=180)
-        command([manager, *("--install=" + name for name in TEX_PACKAGES)], directory, timeout=1200)
+        installed, warnings = _repair_tex(workspace, run_id, directory)
     if not all(find_tool(name, workspace.resources) for name in names):
         raise AppError("dependency_not_detected", "Installation finished but the tools are not available yet. Reopen the app, or use the repair link.", 409)
-    return {"installed": dependency, "message": "Tool executables detected; stock TeX packages installed when applicable. Actual compilation and PDF extraction are checked for each document."}
+    if dependency == "tex":
+        return {"installed": dependency, "packages_installed": installed, "warnings": warnings,
+                "message": "LuaLaTeX, XeLaTeX, and every package the stock templates need are installed and detected."}
+    return {"installed": dependency, "message": "Tool executables detected. Actual PDF extraction is checked for each document."}
+
+
+def tex_manager(resources: Path) -> tuple[str, bool] | None:
+    """MiKTeX's package manager: the `miktex` CLI (preferred) or legacy `mpm`."""
+    if modern := find_tool("miktex", resources):
+        return modern, True
+    if legacy := find_tool("mpm", resources):
+        return legacy, False
+    return None
+
+
+def tex_description(tools_ready: bool, missing: list[str] | None) -> str:
+    if tools_ready and missing:
+        packages = ", ".join(dict.fromkeys(package_for(name) for name in missing))
+        return f"Missing TeX packages the CV and cover letter need: {packages}. Use Repair to install them."
+    return "LuaLaTeX and XeLaTeX plus the stock template packages are required. Compilation never opens package-install dialogs."
+
+
+def _tail(exc: AppError) -> str:
+    output = exc.detail.get("output", "") if isinstance(exc.detail, dict) else ""
+    lines = [line for line in str(output).splitlines() if line.strip() and "checked for MiKTeX updates" not in line]
+    return "\n".join(lines[-5:]) or exc.message
+
+
+def _repair_tex(workspace: Workspace, run_id: str, directory: Path) -> tuple[list[str], dict[str, str]]:
+    manager = tex_manager(workspace.resources)
+    if not manager:
+        missing = missing_tex_files(workspace.resources, refresh=True) or []
+        packages = ", ".join(dict.fromkeys(package_for(name) for name in missing))
+        raise AppError("tex_package_manager_missing",
+                       "MiKTeX's package manager was not found. Use its repair link and reopen the app."
+                       + (f" Missing packages: {packages}." if packages else ""), 409)
+    executable, modern = manager
+
+    def run(arguments: list[str], timeout: int) -> None:
+        command([executable, *arguments], directory, timeout=timeout)
+
+    workspace.store.event(run_id, "install", {"message": "Updating the MiKTeX package database."})
+    try:
+        run(["packages", "update-package-database"] if modern else ["--update-db"], 600)
+    except AppError as exc:
+        raise AppError("dependency_download_failed",
+                       f"MiKTeX could not update its package database. Check the internet connection and retry. {_tail(exc)}",
+                       502, detail={"output": _tail(exc)}) from exc
+    missing = missing_tex_files(workspace.resources, refresh=True)
+    # When kpsewhich is unavailable, require every template package; `require` skips installed ones.
+    packages = list(TEX_PACKAGES) if missing is None else list(dict.fromkeys(package_for(name) for name in missing))
+    failures: dict[str, str] = {}
+    if packages:
+        workspace.store.event(run_id, "install", {"message": "Installing missing TeX packages in MiKTeX user mode.",
+                                                  "packages": packages})
+        try:
+            if not modern:
+                raise AppError("tool_failed", "Legacy mpm installs one package at a time.", 422)
+            run(["packages", "require", *packages], 1800)
+        except AppError:
+            for package in packages:
+                workspace.store.event(run_id, "install", {"package": package})
+                try:
+                    run(["packages", "require", package] if modern else ["--install=" + package], 600)
+                except AppError as exc:
+                    if "already installed" not in _tail(exc):
+                        failures[package] = _tail(exc)
+    workspace.store.event(run_id, "install", {"message": "Refreshing the TeX file-name database and formats."})
+    if modern:
+        refresh_steps = [["fndb", "refresh"], ["formats", "build", "lualatex"], ["formats", "build", "xelatex"]]
+    else:
+        refresh_steps = [["--update-fndb"]] if find_tool("initexmf", workspace.resources) else []
+        executable = find_tool("initexmf", workspace.resources) or executable
+    for step in refresh_steps:
+        try:
+            run(step, 900)
+        except AppError as exc:
+            failures[" ".join(step)] = _tail(exc)
+    clear_cache()
+    still_missing = missing_tex_files(workspace.resources, refresh=True)
+    if still_missing:
+        names = list(dict.fromkeys(package_for(name) for name in still_missing))
+        raise AppError("tex_missing_package",
+                       f"These TeX packages are still missing after repair: {', '.join(names)}. "
+                       "Install them with the MiKTeX Console (Packages tab) and refresh readiness.", 502,
+                       detail=_failure(
+                           "tex_missing_package", "Some TeX packages could not be installed",
+                           f"After repair, TeX still cannot find {', '.join(still_missing)} "
+                           f"(packages: {', '.join(names)}).",
+                           "Check the internet connection and retry Repair. If it keeps failing, open MiKTeX Console, "
+                           "install the listed packages on the Packages tab, then refresh readiness.",
+                           missing_files=still_missing, packages=names, install_errors=failures,
+                       ))
+    return packages, failures

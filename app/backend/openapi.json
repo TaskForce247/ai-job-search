@@ -1149,6 +1149,68 @@
         }
       }
     },
+    "/api/v1/applications/{application_id}/documents/{kind}/pdf-runs": {
+      "post": {
+        "summary": "Document Pdf Run",
+        "operationId": "document_pdf_run_api_v1_applications__application_id__documents__kind__pdf_runs_post",
+        "parameters": [
+          {
+            "name": "application_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Application Id"
+            }
+          },
+          {
+            "name": "kind",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "enum": [
+                "cv",
+                "cover_letter"
+              ],
+              "type": "string",
+              "title": "Kind"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DocumentPdfInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Queued"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/applications/{application_id}/submissions": {
       "post": {
         "summary": "Submit",
@@ -2388,6 +2450,22 @@
         ],
         "title": "DocumentIssue"
       },
+      "DocumentPdfInput": {
+        "properties": {
+          "expected_revision": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Expected Revision"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "expected_revision"
+        ],
+        "title": "DocumentPdfInput"
+      },
       "DocumentRunInput": {
         "properties": {
           "expected_revision": {
@@ -2413,6 +2491,11 @@
               }
             ],
             "title": "Resume From"
+          },
+          "repair": {
+            "type": "boolean",
+            "title": "Repair",
+            "default": false
           }
         },
         "additionalProperties": false,
@@ -2463,6 +2546,22 @@
               }
             ],
             "title": "Source Artifact Id"
+          },
+          "draft_pdf_artifact_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Draft Pdf Artifact Id"
+          },
+          "draft_pdf_stale": {
+            "type": "boolean",
+            "title": "Draft Pdf Stale",
+            "default": false
           },
           "keyword_coverage": {
             "items": {

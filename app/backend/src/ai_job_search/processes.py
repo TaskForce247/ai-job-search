@@ -111,8 +111,14 @@ def command(arguments: list[str], directory: Path, *, timeout: int = 120,
             output, _ = process.communicate(timeout=timeout)
         except subprocess.TimeoutExpired as exc:
             job.terminate()
-            process.communicate()
-            raise AppError("process_timeout", "The local tool timed out. Saved work is available; repair the dependency and retry.", 504) from exc
+            partial, _ = process.communicate()
+            tool = Path(arguments[0]).name
+            raise AppError(
+                "process_timeout",
+                f"{tool} did not finish within {timeout} seconds and was stopped. Saved work is available; repair the dependency and retry.",
+                504, detail={"tool": tool, "timeout_seconds": timeout,
+                             "output": (partial or b"")[-8000:].decode("utf-8", errors="replace")},
+            ) from exc
         text = output[-2_000_000:].decode("utf-8", errors="replace")
         if process.returncode:
             raise AppError("tool_failed", f"{Path(arguments[0]).name} failed. Review the saved diagnostic and repair the tool.", 422,

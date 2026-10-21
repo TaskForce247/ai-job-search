@@ -1,0 +1,58 @@
+# TeX packages the stock CV (lualatex) and cover letter (xelatex) templates need.
+# Single source of truth for the desktop app's readiness check and repair, and for
+# tools/install_tex_packages.py. Recorded from real compiles of cv/main_example.tex and
+# cover_letters/cover_example.tex on Basic MiKTeX, where each one was missing.
+#
+# Format: <package>  <file the templates load from it>[|<acceptable alternative file>...]
+# Package names are MiKTeX/TeX Live (tlmgr) package names. Files are checked with kpsewhich.
+# When a template change adds a \usepackage, add its package here.
+
+moderncv          moderncv.cls
+fontawesome6      fontawesome6.sty|fontawesome5.sty
+academicons       academicons.sty
+luatexbase        luatexbase.sty
+ctablestack       ctablestack.sty
+luaotfload        luaotfload.lua
+lualibs           lualibs.lua
+lua-uni-algos     lua-uni-case.lua
+fontspec          fontspec.sty
+pgf               pgf.sty
+xcolor            xcolor.sty
+hyperref          hyperref.sty
+geometry          geometry.sty
+fancyhdr          fancyhdr.sty
+colortbl          colortbl.sty
+microtype         microtype.sty
+multirow          multirow.sty
+import            import.sty
+needspace         needspace.sty
+titlesec          titlesec.sty
+textpos           textpos.sty
+xltxtra           xltxtra.sty
+metalogo          metalogo.sty
+realscripts       realscripts.sty
+xunicode          xunicode.sty
+tipa              t3enc.def
+cite              cite.sty
+etoolbox          etoolbox.sty
+iftex             iftex.sty
+url               url.sty
+pdftexcmds        pdftexcmds.sty
+epstopdf-pkg      epstopdf-base.sty
+kvsetkeys         kvsetkeys.sty
+kvdefinekeys      kvdefinekeys.sty
+pdfescape         pdfescape.sty
+ltxcmds           ltxcmds.sty
+infwarerr         infwarerr.sty
+hycolor           hycolor.sty
+refcount          refcount.sty
+gettitlestring    gettitlestring.sty
+kvoptions         kvoptions.sty
+stringenc         stringenc.sty
+intcalc           intcalc.sty
+bitset            bitset.sty
+bigintcalc        bigintcalc.sty
+rerunfilecheck    rerunfilecheck.sty
+uniquecounter     uniquecounter.sty
+lm                lmroman10-regular.otf
+zapfding          pzdr.tfm

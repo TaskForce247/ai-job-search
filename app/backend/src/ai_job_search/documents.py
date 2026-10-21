@@ -7,10 +7,23 @@ from pathlib import Path
 from typing import NotRequired, TypedDict
 
 from .errors import AppError
-from .models import DocumentContent, DocumentIssue, DraftPair, Profile
+from .models import DocumentBlock, DocumentContent, DocumentIssue, DraftPair, Profile
 from .policy import load_helper
 from .processes import command
+from .runtime import SETTINGS_ACTION, _failure
 from .storage import digest
+from .tex import (
+    QUIET_TEX_ENVIRONMENT,
+    first_error,
+    log_tail,
+    missing_from_log,
+    missing_tex_files,
+    package_for,
+)
+from .tex import clear_cache as clear_tex_cache
+
+COMPILE_FIRST_TIMEOUT = 300
+COMPILE_TIMEOUT = 120
 
 ESCAPES = {
     "\\": r"\textbackslash{}", "{": r"\{", "}": r"\}", "$": r"\$", "&": r"\&",
@@ -20,6 +33,37 @@ ESCAPES = {
 
 def tex(value: str) -> str:
     return "".join(ESCAPES.get(character, character) for character in value if character >= " " or character == "\n")
+
+
+def tex_text(value: str) -> str:
+    return "\\par\n".join(
+        "\\newline{} ".join(tex(line) for line in paragraph.split("\n"))
+        for paragraph in re.split(r"\n[ \t]*\n", value.replace("\r\n", "\n").strip())
+    )
+
+
+def block_body(block: DocumentBlock, *, include_heading: bool = True, include_text: bool = True) -> str:
+    parts = []
+    if block.heading and include_heading:
+        parts.append("\\textbf{" + tex_text(block.heading) + "}")
+    for value in (
+        " | ".join(value for value in (block.organization, block.location) if value),
+        " - ".join(value for value in (block.start, block.end) if value),
+        block.text if include_text else "",
+    ):
+        if value:
+            parts.append(tex_text(value))
+    return "\\newline{} ".join(parts)
+
+
+def tex_bullets(block: DocumentBlock) -> str:
+    if not block.bullets:
+        return ""
+    return (
+        "\\begin{itemize}\n"
+        + "\n".join("\\item {" + tex_text(bullet.text) + "}" for bullet in block.bullets)
+        + "\n\\end{itemize}\n"
+    )
 
 
 def cv_preamble(profile: Profile, resources: Path) -> str:
@@ -53,10 +97,12 @@ def render_cv(profile: Profile, content: DocumentContent, resources: Path) -> st
             bullets = False
         if block.kind == "heading":
             result += f"\\needspace{{4\\baselineskip}}\\section{{{tex(block.heading or block.text)}}}\n"
+            body = block_body(block, include_heading=False, include_text=bool(block.heading and block.text != block.heading))
+            if body:
+                result += body + "\\par\n"
+            result += tex_bullets(block)
         elif block.kind == "entry":
-            details = tex(block.text)
-            if block.bullets:
-                details += "\\begin{itemize}\n" + "\n".join("\\item " + tex(b.text) for b in block.bullets) + "\n\\end{itemize}"
+            details = tex_text(block.text) + tex_bullets(block)
             dates = " - ".join(value for value in (block.start, block.end) if value)
             result += (
                 "\\needspace{5\\baselineskip}\n"
@@ -67,9 +113,9 @@ def render_cv(profile: Profile, content: DocumentContent, resources: Path) -> st
             if not bullets:
                 result += "\\begin{itemize}\n"
                 bullets = True
-            result += "\\item " + tex(block.text) + "\n"
+            result += "\\item {" + block_body(block) + tex_bullets(block) + "}\n"
         else:
-            result += "\\small{" + tex(block.text) + "}\\par\\vspace{4pt}\n"
+            result += "{\\small " + block_body(block) + "\\par}\n" + tex_bullets(block) + "\\vspace{4pt}\n"
     if bullets:
         result += "\\end{itemize}\n"
     return result + "\\end{document}\n"
@@ -77,29 +123,39 @@ def render_cv(profile: Profile, content: DocumentContent, resources: Path) -> st
 
 def render_cover(profile: Profile, content: DocumentContent, company: str) -> str:
     result = (
-        "\\documentclass[]{cover}\n\\usepackage{fancyhdr}\n"
+        "\\documentclass[a4paper]{cover}\n\\usepackage{fancyhdr}\n"
+        "\\setlength{\\parindent}{0pt}\n"
         "\\pagestyle{fancy}\\fancyhf{}\\renewcommand{\\headrulewidth}{0pt}\n"
         "\\begin{document}\\thispagestyle{empty}\n"
         f"\\namesection{{}}{{\\Huge{{{tex(profile.name)}}}}}{{{tex(profile.email)} | {tex(profile.phone)}}}\n"
         f"\\companyname{{{tex(company)}}}\n\\currentdate{{\\today}}\n"
     )
     bullets = False
+    list_style = (
+        "{\\raggedright\\fontspec[Path = OpenFonts/fonts/raleway/]{Raleway-Medium}"
+        "\\fontsize{11pt}{13pt}\\selectfont"
+    )
     for block in content.blocks:
         if block.kind != "bullet" and bullets:
             result += "\\end{itemize}\\par}\n"
             bullets = False
         if block.kind == "bullet":
             if not bullets:
-                result += (
-                    "{\\raggedright\\fontspec[Path = OpenFonts/fonts/raleway/]{Raleway-Medium}"
-                    "\\fontsize{11pt}{13pt}\\selectfont\\begin{itemize}\n"
-                )
+                result += list_style + "\\begin{itemize}\n"
                 bullets = True
-            result += "\\item " + tex(block.text) + "\n"
+            result += "\\item {" + block_body(block) + tex_bullets(block) + "}\n"
         elif block.kind == "heading":
-            result += "\\lettercontent{\\textbf{" + tex(block.heading or block.text) + "}}\n"
+            body = "\\textbf{" + tex_text(block.heading or block.text) + "}"
+            details = block_body(block, include_heading=False, include_text=bool(block.heading and block.text != block.heading))
+            if details:
+                body += "\\newline{} " + details
+            result += "\\lettercontent{" + body + "}\n"
         else:
-            result += "\\lettercontent{" + tex(block.text) + "}\n"
+            body = block_body(block)
+            if body:
+                result += "\\lettercontent{" + body + "}\n"
+        if block.kind != "bullet" and block.bullets:
+            result += list_style + tex_bullets(block) + "\\par}\n"
     if bullets:
         result += "\\end{itemize}\\par}\n"
     return result + "\\end{document}\n"
@@ -287,7 +343,7 @@ class DocumentService:
             raise AppError(findings[0]["code"], findings[0]["message"], 422, detail={"findings": findings})
 
     def compile(self, kind: str, profile: Profile, content: DocumentContent, company: str,
-                directory: Path) -> Path:
+                directory: Path, *, draft: bool = False) -> Path:
         engine_name = "lualatex" if kind == "cv" else "xelatex"
         from .readiness import find_tool
         engine = find_tool(engine_name, self.resources)
@@ -295,6 +351,12 @@ class DocumentService:
             raise AppError("document_tool_missing", f"{engine_name} is not installed. Use Settings > Document tools to install or repair MiKTeX.", 409)
         directory.mkdir(parents=True, exist_ok=True)
         source = render_cv(profile, content, self.resources) if kind == "cv" else render_cover(profile, content, company)
+        if draft:
+            source = source.replace("\\begin{document}", (
+                "\\AddToHook{shipout/foreground}{\\put(0,-14){\\makebox[\\paperwidth]{"
+                "\\normalfont\\scriptsize UNVERIFIED DRAFT - factual and layout checks not completed}}}\n"
+                "\\begin{document}"
+            ), 1)
         filename = kind + ".tex"
         (directory / filename).write_text(source, encoding="utf-8")
         if kind == "cover_letter":
@@ -303,21 +365,90 @@ class DocumentService:
             if not font_target.exists():
                 shutil.copytree(self.resources / "cover_letters" / "OpenFonts", font_target)
         environment = {
-            "openin_any": "p", "openout_any": "p", "shell_escape": "0",
-            "MIKTEX_ENABLE_INSTALLER": "0", "MIKTEX_AUTOINSTALL": "0",
+            "openin_any": "p", "openout_any": "p", "shell_escape": "0", **QUIET_TEX_ENVIRONMENT,
         }
         arguments = [engine, "-no-shell-escape", "-interaction=nonstopmode", "-halt-on-error",
                      "-file-line-error", filename]
         if "miktex" in str(Path(engine)).lower():
             arguments.insert(1, "--disable-installer")
-        for _ in range(2):
-            command(arguments, directory, timeout=120, environment=environment)
+        label = "CV" if kind == "cv" else "cover letter"
+        missing = missing_tex_files(self.resources)
+        if missing:
+            raise self._missing_packages(engine_name, label, missing)
+        # The first pass may build MiKTeX's file-name database, formats, and font caches on a fresh install.
+        for timeout in (COMPILE_FIRST_TIMEOUT, COMPILE_TIMEOUT):
+            try:
+                command(arguments, directory, timeout=timeout, environment=environment)
+            except AppError as exc:
+                raise self._compile_error(exc, engine_name, label, kind, directory) from exc
         pdf = directory / (kind + ".pdf")
         if not pdf.is_file():
             raise AppError("pdf_missing", "The document compiler did not produce a PDF.", 422)
         return pdf
 
-    def verify(self, kind: str, pdf: Path, profile: Profile, requirements: list[dict]) -> tuple[list[dict], str, list[dict]]:
+    @staticmethod
+    def _missing_packages(engine: str, label: str, files: list[str], tail: str = "") -> AppError:
+        packages = list(dict.fromkeys(package_for(name) for name in files))
+        names = ", ".join(packages)
+        message = (f"{engine} cannot compile the {label} because required TeX package(s) are missing: {names}. "
+                   "Open Settings > Document tools, choose Repair, then retry.")
+        return AppError("tex_missing_package", message, 409, detail=_failure(
+            "tex_missing_package", "A TeX package is missing",
+            f"{engine} needs {', '.join(files)} for the {label}, provided by the TeX package(s) {names}, "
+            "which are not installed. Packages are never installed silently during compilation.",
+            "Open Settings > Document tools and choose Repair to install the missing packages, "
+            "or install them with your TeX distribution's package manager. Then reopen the draft and resume checks.",
+            action=SETTINGS_ACTION, tool=engine, missing_files=files, packages=packages, log_tail=tail,
+        ))
+
+    def _compile_error(self, exc: AppError, engine: str, label: str, kind: str, directory: Path) -> AppError:
+        if exc.code not in ("tool_failed", "process_timeout"):
+            return exc
+        detail = exc.detail if isinstance(exc.detail, dict) else {}
+        output = str(detail.get("output", ""))
+        tail = log_tail(directory, kind)
+        missing_file = missing_from_log(tail + "\n" + output)
+        if missing_file:
+            clear_tex_cache()
+            return self._missing_packages(engine, label, [missing_file], tail[-2000:])
+        if exc.code == "process_timeout":
+            seconds = detail.get("timeout_seconds")
+            return AppError("tex_timeout", f"{engine} did not finish compiling the {label} within {seconds} seconds and was stopped.",
+                            504, detail=_failure(
+                                "tex_timeout", "Document compilation timed out",
+                                f"{engine} was still running after {seconds} seconds while compiling the {label}. "
+                                "This usually means the TeX installation is incomplete or is waiting for an "
+                                "install prompt, or a first-run cache build is very slow.",
+                                "Open Settings > Document tools and choose Repair, which installs missing packages and "
+                                "prepares TeX caches. Then reopen the draft and resume checks.",
+                                action=SETTINGS_ACTION, tool=engine, timeout_seconds=seconds,
+                                last_error=first_error(tail) or first_error(output),
+                                log_tail=(tail or output)[-2000:],
+                            ))
+        reason = first_error(tail) or first_error(output)
+        return AppError("tool_failed", f"{engine} could not compile the {label}" + (f": {reason}" if reason else "."), 422,
+                        detail={**detail, "last_error": reason})
+
+    def content_check(self, content: DocumentContent, text: str) -> dict:
+        def normalized(value: str) -> str:
+            value = re.sub(r"(?<=\w)-\s*\n\s*(?=\w)", "", value)
+            return re.sub(r"\s+", "", self.pdf_helper.normalize_text(value).casefold().replace("\u00ad", "").replace("-", ""))
+
+        extracted = normalized(text)
+        missing = []
+        for index, block in enumerate(content.blocks, 1):
+            values = [block.heading, block.organization, block.location, block.start, block.end,
+                      block.text, *(bullet.text for bullet in block.bullets)]
+            if any(normalized(value) not in extracted for value in values if value.strip()):
+                missing.append(str(index))
+        return {
+            "id": "content", "label": "Saved draft content in PDF", "status": "fail" if missing else "pass",
+            "message": "Text is missing from the PDF for content block(s): " + ", ".join(missing) + "." if missing
+                       else "All saved headings, fields, body text and achievement bullets are present in the PDF text layer.",
+        }
+
+    def verify(self, kind: str, pdf: Path, profile: Profile, requirements: list[dict],
+               content: DocumentContent | None = None) -> tuple[list[dict], str, list[dict]]:
         checks = []
         text = ""
         try:
@@ -331,6 +462,8 @@ class DocumentService:
         except self.pdf_helper.VerificationError as exc:
             checks.append({"id": "text", "label": "Text, contact details, and page count", "status": "fail",
                            "message": str(exc)})
+        if content is not None:
+            checks.append(self.content_check(content, text))
         if text:
             garbage = bool(re.search(r"\(cid:\d+\)|\ufffd", text))
             checks.append({"id": "text_garbage", "label": "ATS text encoding", "status": "fail" if garbage else "pass",

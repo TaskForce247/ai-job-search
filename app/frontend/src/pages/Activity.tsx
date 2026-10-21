@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { api, artifactUrl, queryString } from '../api';
+import { RunFailure } from '../components/RunFailure';
 import { isActiveRun, useAction, useActivity, useApiQuery, useNotices } from '../query';
-import type { ApiSchema, Approval, DocumentKind, Page, Run, RunAccepted } from '../types';
+import type { ApiSchema, Application, Approval, DocumentKind, Page, Run, RunAccepted } from '../types';
 import { hasBlockingGate, ProposalView, StructuredDetails } from '../components/proposals';
 import { Alert, Badge, Button, Empty, ErrorPanel, Field, formatDate, humanize, Loading, Modal, PageHeader, Pager, Panel } from '../components/ui';
 
@@ -21,9 +22,11 @@ function choiceLabel(choice: string, kind: string) {
   return humanize(choice);
 }
 
-export function ApprovalCard({ approval, runKind = '', disabled = false, onEditIssue }: {
+export function ApprovalCard({ approval, runKind = '', disabled = false, onEditIssue, onGenerateEdits, generateEditsDisabled = false }: {
   approval: Approval; runKind?: string; disabled?: boolean;
   onEditIssue?: (kind?: DocumentKind, blockId?: string) => void;
+  onGenerateEdits?: () => void;
+  generateEditsDisabled?: boolean;
 }) {
   const [confirmation, setConfirmation] = useState('');
   const navigate = useNavigate();
@@ -31,6 +34,20 @@ export function ApprovalCard({ approval, runKind = '', disabled = false, onEditI
   const kind = `${approval.kind} ${runKind}`.toLowerCase();
   const requiredConfirmation = kind.includes('restore') ? 'RESTORE' : kind.includes('reset') ? 'RESET' : '';
   const blocked = hasBlockingGate(approval.proposal);
+  const applicationId = typeof approval.proposal.application_id === 'string' ? approval.proposal.application_id : undefined;
+  const contentReview = ['document_review', 'document_correction'].includes(approval.kind);
+  const repair = useAction(async () => {
+    if (!applicationId) throw new Error('This review has no application reference. Open the application workspace to recover it.');
+    const application = await api<Application>(`/applications/${encodeURIComponent(applicationId)}`);
+    return api<RunAccepted>(`/applications/${encodeURIComponent(applicationId)}/document-runs`, {
+      method: 'POST', body: {
+        expected_revision: application.revision, instruction: '', repair: true, resume_from: approval.run_id,
+      } satisfies ApiSchema<'DocumentRunInput'>,
+    });
+  }, (result) => {
+    queued(result, 'AI edits queued for the failed checks. Review and accept the new before-and-after proposal; saved drafts have not changed. API charges may apply.');
+    if (applicationId) navigate(`/applications/${encodeURIComponent(applicationId)}?tab=checks&run=${encodeURIComponent(result.run_id)}`);
+  });
   const action = useAction((decision: string) => api<RunAccepted>(`/approvals/${encodeURIComponent(approval.id)}/decision`, {
     method: 'POST', body: {
       decision, expected_revision: approval.revision,
@@ -50,8 +67,26 @@ export function ApprovalCard({ approval, runKind = '', disabled = false, onEditI
   return <section className="approval-card" aria-labelledby={`approval-${approval.id}`}>
     <div className="section-heading"><h3 id={`approval-${approval.id}`}>{approval.title}</h3><Badge value={approval.status}>
       {approval.status === 'pending' ? 'Your decision needed' : humanize(approval.status)}</Badge></div>
-    <ProposalView proposal={approval.proposal} kind={approval.kind} onEditIssue={onEditIssue} />
-    {approval.status === 'pending' ? <div className="stack approval-actions">
+    <ProposalView proposal={approval.proposal} kind={approval.kind} onEditIssue={onEditIssue}
+        onGenerateEdits={approval.status === 'pending' ? onGenerateEdits : undefined}
+        disabled={generateEditsDisabled || action.isPending || repair.isPending} />
+      {approval.status === 'pending' ? <div className="stack approval-actions">
+        {approval.kind === 'document_review' && <p className="hint">
+          There is no checked correction to accept yet. Generate AI edits to review a new proposal, or edit the saved draft manually.
+          “Keep saved draft” dismisses this review without fixing the issues.
+        </p>}
+        {contentReview && applicationId && <>
+          <ErrorPanel error={repair.error} />
+          <div className="actions">
+            {(!onGenerateEdits || !Array.isArray(approval.proposal.issues) || !approval.proposal.issues.length) &&
+              <Button variant="primary" busy={repair.isPending}
+                disabled={disabled || generateEditsDisabled || action.isPending}
+                onClick={() => onGenerateEdits ? onGenerateEdits() : repair.mutate()}>Generate AI edits</Button>}
+            {!onEditIssue && <Link className="button button-secondary"
+              to={`/applications/${encodeURIComponent(applicationId)}?tab=checks`}>Edit draft manually</Link>}
+          </div>
+          {!onGenerateEdits && <p className="hint">AI edits may incur API charges. Generating a proposal never accepts it or confirms missing facts.</p>}
+        </>}
       {requiredConfirmation && <Field id={`confirmation-${approval.id}`} label={`Type ${requiredConfirmation} to approve`}
         hint="This changes local files. Review the proposed changes and make a backup first.">
         <input id={`confirmation-${approval.id}`} autoComplete="off" spellCheck={false} value={confirmation}
@@ -63,7 +98,7 @@ export function ApprovalCard({ approval, runKind = '', disabled = false, onEditI
         return <Button key={choice} type="button"
           variant={negative ? 'secondary' : requiredConfirmation ? 'danger' : 'primary'}
           busy={action.isPending}
-          disabled={!negative && (disabled || (!!requiredConfirmation && confirmation !== requiredConfirmation))}
+          disabled={repair.isPending || (!negative && (disabled || (!!requiredConfirmation && confirmation !== requiredConfirmation)))}
           onClick={() => action.mutate(choice)}>{choiceLabel(choice, kind)}</Button>;
       })}</div>
       {blocked && <p className="field-error">Document preparation is unavailable because a required gate failed.
@@ -113,10 +148,7 @@ function RunCard({ run }: { run: Run }) {
     <p className="preserve-lines">{run.message || 'The operation has been recorded. Waiting for its next stage.'}</p>
     <div className="run-meta"><span>Started {formatDate(run.created_at, true)}</span>
       <span>Updated {formatDate(run.updated_at, true)}</span><span>API cost ${run.cost_usd.toFixed(2)}</span></div>
-    {run.error && <Alert tone="danger" title={run.status === 'interrupted' ? 'Work was interrupted' : 'The operation did not complete'}>
-      <p className="preserve-lines">{run.error}</p>{run.error_code && <p className="hint">Reference: {run.error_code}</p>}
-      <p>Saved drafts are preserved. Fix the reported cause before retrying. A queued request is not a successful result.</p>
-    </Alert>}
+    <RunFailure run={run} />
     {run.status === 'awaiting_user' && !pending.length && <Alert tone="warning">
       This operation is waiting for input but has no current decision available. Refresh Activity or retry after resolving changed inputs.</Alert>}
     {pending.map((approval) => <ApprovalCard key={approval.id} approval={approval} runKind={run.kind} />)}

@@ -29,14 +29,14 @@ SUPPORTED_WORDING = "Built Python services for an internal reporting team."
 
 
 @pytest.mark.parametrize("stage", ["draft", "independent_review_1", "repair_2", "independent_review_3"])
-def test_boilerplate_revisions_pause_and_retain_substantive_drafts(confirmed, fixture_documents, stage):
+def test_boilerplate_revisions_retain_drafts_and_identify_the_failing_output(confirmed, fixture_documents, stage):
     class DestructiveRuntime(WordingRuntime):
         def __init__(self):
             super().__init__(repair=False)
 
         async def generate(self, run_id, current_stage, data, *args, **kwargs):
             result = await super().generate(run_id, current_stage, data, *args, **kwargs)
-            if current_stage == stage:
+            if current_stage == stage or current_stage == stage + "_output_retry":
                 pair = result.revised if current_stage.startswith("independent_review_") else result
                 pair.cv.blocks = [DocumentBlock(text="Available upon request.")]
                 pair.cover_letter.blocks = [DocumentBlock(text="I look forward to hearing from you.")]
@@ -45,20 +45,87 @@ def test_boilerplate_revisions_pause_and_retain_substantive_drafts(confirmed, fi
     runtime = DestructiveRuntime()
     response, _, _ = approved_application(confirmed, runtime)
     result = finish_preparation(confirmed, runtime, response)
-    assert result["status"] == "awaiting_user", result
-    approval = result["approvals"][0]
-    assert approval["kind"] == "document_review" and approval["choices"] == ["reject"]
-    assert {issue["document"] for issue in approval["proposal"]["issues"]} == {"cv", "cover_letter"}
+    if stage == "draft":
+        assert result["status"] == "awaiting_user", result
+        approval = result["approvals"][0]
+        assert approval["kind"] == "document_review" and approval["choices"] == ["reject"]
+        assert {issue["document"] for issue in approval["proposal"]["issues"]} == {"cv", "cover_letter"}
+    else:
+        assert result["status"] == "failed" and result["error_code"] == "ai_incomplete_documents", result
+        assert not result["approvals"]
+        failure = result["result"]["ai_failure"]
+        assert failure["stage"] == stage + "_output_retry"
+        assert set(failure["documents"]) == {"cv", "cover_letter"}
+        assert not ApplicationService(confirmed).get(response["application_id"])["content_issues"]
     assert not result["artifacts"] and not ApplicationService(confirmed).tracker()[1]
     assert not any(call["stage"].startswith("visual_") for call in runtime.calls)
     application = ApplicationService(confirmed).get(response["application_id"])
     if stage != "draft":
         assert len(application["documents"]["cv"]["content"]["blocks"]) == 2
         assert application["documents"]["cover_letter"]["content"]["blocks"][1]["text"] == BAD_WORDING
-        assert len(approval["proposal"]["after"]["cv"]["blocks"]) == 2
     with confirmed.store.connect() as connection:
         assert not connection.execute(
             "SELECT 1 FROM steps WHERE run_id=? AND stage LIKE 'compile_%'", (result["id"],),
+        ).fetchone()
+
+
+@pytest.mark.parametrize("stage", ["independent_review_1", "repair_2"])
+def test_empty_ai_revision_fails_without_treating_it_as_no_changes(confirmed, fixture_documents, stage):
+    class EmptyRuntime(WordingRuntime):
+        def __init__(self):
+            super().__init__(repair=False)
+
+        async def generate(self, run_id, current_stage, data, *args, **kwargs):
+            result = await super().generate(run_id, current_stage, data, *args, **kwargs)
+            if current_stage == stage or current_stage == stage + "_output_retry":
+                pair = result.revised if current_stage.startswith("independent_review_") else result
+                pair.cv.blocks = []
+                pair.cover_letter.blocks = []
+            return result
+
+    runtime = EmptyRuntime()
+    response, _, _ = approved_application(confirmed, runtime)
+    result = finish_preparation(confirmed, runtime, response)
+    assert result["status"] == "failed" and result["error_code"] == "ai_incomplete_documents", result
+    assert not result["approvals"] and not result["artifacts"]
+    application = ApplicationService(confirmed).get(response["application_id"])
+    assert all(document["content"]["blocks"] for document in application["documents"].values())
+    assert not any("incomplete" in issue["message"] for issue in application.get("content_issues", []))
+    calls = [call for call in runtime.calls if call["stage"].startswith(stage)]
+    assert len(calls) == 2 and calls[-1]["stage"] == stage + "_output_retry"
+
+
+@pytest.mark.parametrize("stage", ["independent_review_1", "repair_2"])
+@pytest.mark.parametrize("empty", [False, True])
+def test_malformed_document_revision_is_retried_with_full_original_drafts(
+    confirmed, fixture_documents, stage, empty,
+):
+    requests = []
+
+    class RetryRuntime(WordingRuntime):
+        async def generate(self, run_id, current_stage, data, *args, **kwargs):
+            result = await super().generate(run_id, current_stage, data, *args, **kwargs)
+            if current_stage.startswith(stage):
+                requests.append(data)
+            if current_stage == stage:
+                pair = result.revised if current_stage.startswith("independent_review_") else result
+                pair.cv.blocks = [] if empty else [DocumentBlock(text="Available upon request.")]
+            return result
+
+    runtime = RetryRuntime()
+    response, _, _ = approved_application(confirmed, runtime)
+    result = finish_preparation(confirmed, runtime, response)
+    assert result["status"] == "awaiting_user", result
+    assert result["approvals"][0]["kind"] == "document_correction"
+    assert len(requests) == 2
+    assert requests[0]["drafts"] == requests[1]["drafts"]
+    assert len(requests[1]["drafts"]["cv"]["blocks"]) > 1
+    assert requests[1]["rejected_output_findings"][0]["document"] == "cv"
+    assert "BOTH full documents" in requests[1]["task"]
+    with confirmed.store.connect() as connection:
+        assert connection.execute(
+            "SELECT 1 FROM events WHERE run_id=? AND type='ai_output_rejected' AND stage=?",
+            (result["id"], stage),
         ).fetchone()
 
 
@@ -127,7 +194,7 @@ def test_destructive_rewrite_is_not_offered_for_acceptance(confirmed, fixture_do
     class DestructiveRewriteRuntime(FixtureRuntime):
         async def generate(self, run_id, stage, data, *args, **kwargs):
             result = await super().generate(run_id, stage, data, *args, **kwargs)
-            if stage == "rewrite":
+            if stage.startswith("rewrite"):
                 result.cv.blocks = [DocumentBlock(text="Available upon request.")]
             return result
 
@@ -135,9 +202,8 @@ def test_destructive_rewrite_is_not_offered_for_acceptance(confirmed, fixture_do
         "application_id": original["id"], "expected_revision": original["revision"],
         "instruction": "Tighten the wording.",
     })
-    assert result["status"] == "awaiting_user" and not result["artifacts"]
-    approval = result["approvals"][0]
-    assert approval["kind"] == "document_review" and approval["choices"] == ["reject"]
+    assert result["status"] == "failed" and result["error_code"] == "ai_incomplete_documents"
+    assert not result["artifacts"] and not result["approvals"]
     assert applications.get(original["id"])["documents"] == original["documents"]
 
 

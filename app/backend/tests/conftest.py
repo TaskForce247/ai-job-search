@@ -155,7 +155,7 @@ def run_operation(workspace: Workspace, runtime: FixtureRuntime, kind: str, inpu
 
 @pytest.fixture
 def fixture_documents(monkeypatch):
-    def compile_document(self, kind, profile, content, company, directory):
+    def compile_document(self, kind, profile, content, company, directory, *, draft=False):
         directory.mkdir(parents=True, exist_ok=True)
         pdf = directory / (kind + ".pdf")
         writer = PdfWriter()
@@ -167,7 +167,7 @@ def fixture_documents(monkeypatch):
         (directory / (kind + ".tex")).write_text("% Synthetic injected compilation fixture\n", encoding="utf-8")
         return pdf
 
-    def verify(self, kind, pdf, profile, requirements):
+    def verify(self, kind, pdf, profile, requirements, content=None):
         checks = [{"id": "fixture_mechanical", "label": "Injected mechanical fixture", "status": "pass",
                    "message": "Deterministic integration test, not a real template compilation."}]
         return checks, f"{profile.name} {profile.email} {profile.phone} Python", []

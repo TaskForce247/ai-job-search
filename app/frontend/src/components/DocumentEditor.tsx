@@ -34,7 +34,9 @@ export function isVerifiedDocument(view: DocumentView) {
   return !view.stale && view.checks.length > 0 && view.checks.every((check) => check.status === 'pass');
 }
 
-export function DocumentChecks({ view, stale }: { view: DocumentView; stale: boolean }) {
+export function DocumentChecks({ view, stale, onGenerateEdits, disabled = false }: {
+  view: DocumentView; stale: boolean; onGenerateEdits?: () => void; disabled?: boolean;
+}) {
   return <section aria-label="Document verification" className="document-checks">
     <h3>Verification & keyword coverage</h3>
     {stale && <p className="field-error">Checks are out of date until the current edits are compiled and verified.</p>}
@@ -42,6 +44,8 @@ export function DocumentChecks({ view, stale }: { view: DocumentView; stale: boo
       <Badge value={stale ? 'pending' : check.status} /><div><strong>{check.label}</strong>
         <p className="hint">{stale ? 'This result must be checked again for the current content.' : check.message}</p></div>
     </li>)}</ul> : <p className="hint">No verification results yet. A missing or skipped check is not a pass.</p>}
+    {onGenerateEdits && view.checks.some((check) => check.status === 'fail') &&
+      <Button variant="secondary" disabled={disabled} onClick={onGenerateEdits}>Generate AI edits for failed checks</Button>}
     {!!view.keyword_coverage?.length && <details><summary>Posting keywords</summary>
       <div className="table-scroll"><table><caption className="sr-only">Posting keyword coverage</caption><thead><tr>
         <th>Term</th><th>Priority</th><th>Coverage</th><th>Note</th></tr></thead><tbody>
@@ -114,6 +118,10 @@ export function DocumentEditor({ applicationId, kind, view, evidence, onDirtyCha
     setHistory([]); setDiscard(false); save.reset();
   }
   const stale = dirty || view.stale || save.isPending || view.revision !== revision;
+  const showDraftPdf = !!view.draft_pdf_artifact_id && (!isVerifiedDocument(view) || !view.pdf_artifact_id);
+  const previewArtifact = showDraftPdf ? view.draft_pdf_artifact_id : view.pdf_artifact_id;
+  const previewStale = showDraftPdf
+    ? dirty || save.isPending || view.revision !== revision || !!view.draft_pdf_stale : stale;
   const newer = view.revision !== revision;
   return <div className="stack">
     <div className="editor-toolbar"><div className="actions"><Badge value={dirty ? 'pending' : 'ready'}>
@@ -188,7 +196,7 @@ export function DocumentEditor({ applicationId, kind, view, evidence, onDirtyCha
         </fieldset>
       </section>
       {pane !== 'read' && <section className="document-preview-panel" aria-label="Compiled PDF preview">
-        <h3>PDF preview</h3><PdfPreview artifactId={view.pdf_artifact_id} stale={stale} content={content} />
+        <h3>PDF preview</h3><PdfPreview artifactId={previewArtifact} stale={previewStale} content={content} unverified={showDraftPdf} />
         {view.source_artifact_id && <p><a href={artifactUrl(view.source_artifact_id)} download>Download generated source</a> <span className="hint">(advanced)</span></p>}
         <DocumentChecks view={view} stale={stale} />
       </section>}
