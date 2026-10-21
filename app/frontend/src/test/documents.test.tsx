@@ -185,8 +185,26 @@ describe('local PDF preview and document revisions', () => {
     expect(screen.getByText('Not checked')).not.toHaveClass('badge-positive');
     rerender(<DocumentChecks view={documentFixture} stale />);
     expect(screen.queryByText('Passed')).not.toBeInTheDocument();
-    expect(screen.getAllByText('Needs checking').length).toBeGreaterThan(1);
-    expect(screen.getByText('Checks are out of date until the current edits are compiled and verified.')).toBeVisible();
+    expect(screen.getByText('Previously passed · outdated')).not.toHaveClass('badge-positive');
+    expect(screen.getByText('Not checked for current text')).not.toHaveClass('badge-positive');
+    expect(screen.getByText('Previous results · out of date')).toBeVisible();
+    expect(screen.getByText('Exactly two pages.')).toBeVisible();
+  });
+
+  it('distinguishes never checked and current failed checks from outdated results', () => {
+    const edits = vi.fn();
+    const { rerender } = renderApp(<DocumentChecks view={{ ...documentFixture, checks: [] }} stale />);
+    expect(screen.getByText(/Never checked/)).toBeVisible();
+    const view = { ...documentFixture, checks_stale: true, checks_stale_reasons: ['The saved text changed after these checks.'],
+      checks: [{ id: 'pages', label: 'Page count', status: 'fail' as const, message: 'Expected 2; found 3.' }] };
+    rerender(<DocumentChecks view={view} stale onGenerateEdits={edits} />);
+    expect(screen.getByText('Previously failed · outdated')).not.toHaveClass('badge-negative');
+    expect(screen.getByText('Expected 2; found 3.')).toBeVisible();
+    expect(screen.getByText('The saved text changed after these checks.')).toBeVisible();
+    expect(screen.queryByRole('button', { name: 'Generate AI edits for failed checks' })).not.toBeInTheDocument();
+    rerender(<DocumentChecks view={{ ...view, checks_stale: false }} stale={false} onGenerateEdits={edits} />);
+    expect(screen.getByText('Failed')).toHaveClass('badge-negative');
+    expect(screen.getByRole('button', { name: 'Generate AI edits for failed checks' })).toBeEnabled();
   });
 
   it('preserves dirty edits when a newer saved rewrite arrives', async () => {

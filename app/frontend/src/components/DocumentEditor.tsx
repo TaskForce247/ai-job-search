@@ -1,11 +1,14 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useImperativeHandle, useState } from 'react';
+import type { Ref } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { api, artifactUrl } from '../api';
 import { useAction, useNotices } from '../query';
 import type { ApiSchema, DocumentBlock, DocumentContent, DocumentKind, DocumentView, Evidence } from '../types';
-import { Alert, Badge, Button, ErrorPanel, Field, Modal } from './ui';
+import { Alert, Badge, Button, ErrorPanel, Field, Modal, formatDate } from './ui';
 import { PdfPreview, ReadDocument } from './PdfPreview';
+import { DocumentComparison } from './DocumentComparison';
+import { UnsavedDocumentGuard } from './UnsavedDocumentGuard';
 
 function clone(content: DocumentContent): DocumentContent {
   return structuredClone(content);
@@ -31,37 +34,51 @@ function EvidenceLinks({ ids, evidence, onChange }: {
 }
 
 export function isVerifiedDocument(view: DocumentView) {
-  return !view.stale && view.checks.length > 0 && view.checks.every((check) => check.status === 'pass');
+  return !!view.pdf_artifact_id && !view.stale && view.checks.length > 0 && view.checks.every((check) => check.status === 'pass');
 }
 
 export function DocumentChecks({ view, stale, onGenerateEdits, disabled = false }: {
   view: DocumentView; stale: boolean; onGenerateEdits?: () => void; disabled?: boolean;
 }) {
+  const checksStale = stale;
+  const keywordsStale = stale || view.stale;
+  const reasons = view.checks_stale_reasons ?? [];
   return <section aria-label="Document verification" className="document-checks">
     <h3>Verification & keyword coverage</h3>
-    {stale && <p className="field-error">Checks are out of date until the current edits are compiled and verified.</p>}
+    {!view.checks.length ? <p className="hint">Never checked. Run checks for the saved document; missing results are not passes.</p>
+      : checksStale && <div className="alert alert-warning"><strong>Previous results · out of date</strong>
+        <p>{reasons.length ? reasons.join(' ') : 'The current edits have not been checked. Previous results are shown below for reference.'}</p></div>}
+    {view.checked_at && <p className="hint">Last checked {formatDate(view.checked_at, true)}
+      {view.checks_revision && ` · text ${view.checks_revision.slice(0, 8)}`}</p>}
     {view.checks.length ? <ul className="checks-list">{view.checks.map((check) => <li key={check.id}>
-      <Badge value={stale ? 'pending' : check.status} /><div><strong>{check.label}</strong>
-        <p className="hint">{stale ? 'This result must be checked again for the current content.' : check.message}</p></div>
-    </li>)}</ul> : <p className="hint">No verification results yet. A missing or skipped check is not a pass.</p>}
-    {onGenerateEdits && view.checks.some((check) => check.status === 'fail') &&
+      <Badge value={checksStale ? 'pending' : check.status}>{checksStale
+        ? check.status === 'pass' ? 'Previously passed · outdated' : check.status === 'fail'
+          ? 'Previously failed · outdated' : 'Not checked for current text' : undefined}</Badge>
+      <div><strong>{check.label}</strong><p className="hint">{check.message}</p></div>
+    </li>)}</ul> : null}
+    {onGenerateEdits && !checksStale && view.checks.some((check) => check.status === 'fail') &&
       <Button variant="secondary" disabled={disabled} onClick={onGenerateEdits}>Generate AI edits for failed checks</Button>}
     {!!view.keyword_coverage?.length && <details><summary>Posting keywords</summary>
       <div className="table-scroll"><table><caption className="sr-only">Posting keyword coverage</caption><thead><tr>
         <th>Term</th><th>Priority</th><th>Coverage</th><th>Note</th></tr></thead><tbody>
         {view.keyword_coverage.map((item, index) => <tr key={`${item.term}-${index}`}><td>{item.term}</td><td>{item.priority}</td>
-          <td>{stale ? 'Needs checking' : item.status}</td><td>{stale ? 'Recheck after compilation.' : item.note}</td></tr>)}
+          <td>{keywordsStale ? 'Needs checking' : item.status}</td><td>{keywordsStale ? 'Recheck after compilation.' : item.note}</td></tr>)}
       </tbody></table></div><p className="hint">Genuine gaps stay visible. Do not add skills or keywords you cannot substantiate.</p>
     </details>}
   </section>;
 }
 
-export function DocumentEditor({ applicationId, kind, view, evidence, onDirtyChange, initialPane = 'content', focusBlockId, editRequest }: {
+export interface DocumentEditorHandle {
+  save: () => Promise<DocumentView>;
+}
+
+export function DocumentEditor({ applicationId, kind, view, evidence, onDirtyChange, initialPane = 'content', focusBlockId, editRequest, ref }: {
   applicationId: string; kind: DocumentKind; view: DocumentView; evidence: Evidence[];
   onDirtyChange: (dirty: boolean) => void;
   initialPane?: 'content' | 'read';
   focusBlockId?: string;
   editRequest?: number;
+  ref?: Ref<DocumentEditorHandle>;
 }) {
   const [content, setContent] = useState(() => clone(view.content));
   const [savedContent, setSavedContent] = useState(() => clone(view.content));
@@ -82,6 +99,9 @@ export function DocumentEditor({ applicationId, kind, view, evidence, onDirtyCha
     client.setQueryData(['document', applicationId, kind], { ...saved, stale: true });
     notify('Document edits saved. Compile and check them before using a PDF.');
   });
+  useImperativeHandle(ref, () => ({
+    save: () => save.mutateAsync(clone(content)),
+  }));
   useEffect(() => { onDirtyChange(dirty); }, [dirty, onDirtyChange]);
   useEffect(() => {
     if (view.revision !== revision && !dirty) {
@@ -124,6 +144,7 @@ export function DocumentEditor({ applicationId, kind, view, evidence, onDirtyCha
     ? dirty || save.isPending || view.revision !== revision || !!view.draft_pdf_stale : stale;
   const newer = view.revision !== revision;
   return <div className="stack">
+    <UnsavedDocumentGuard dirty={dirty} />
     <div className="editor-toolbar"><div className="actions"><Badge value={dirty ? 'pending' : 'ready'}>
       {dirty ? 'Unsaved edits' : 'Content saved'}</Badge><span className="hint">PDF and checks are separate from saving.</span></div>
       <div className="actions"><Button variant="secondary" disabled={!history.length || save.isPending} onClick={() => {
@@ -198,12 +219,12 @@ export function DocumentEditor({ applicationId, kind, view, evidence, onDirtyCha
       {pane !== 'read' && <section className="document-preview-panel" aria-label="Compiled PDF preview">
         <h3>PDF preview</h3><PdfPreview artifactId={previewArtifact} stale={previewStale} content={content} unverified={showDraftPdf} />
         {view.source_artifact_id && <p><a href={artifactUrl(view.source_artifact_id)} download>Download generated source</a> <span className="hint">(advanced)</span></p>}
-        <DocumentChecks view={view} stale={stale} />
+        <DocumentChecks view={view} stale={dirty || (view.checks_stale ?? stale)} />
       </section>}
     </div>
     {(dirty || comparison) && <details><summary>{dirty ? 'Compare current edits with saved content' : 'Compare the previous and current document'}</summary>
-      <div className="comparison"><section><h3>Before</h3><ReadDocument content={dirty ? savedContent : comparison!.before} /></section>
-        <section><h3>After</h3><ReadDocument content={dirty ? content : comparison!.after} /></section></div>
+      <DocumentComparison before={dirty ? savedContent : comparison!.before} after={dirty ? content : comparison!.after}
+        beforeTitle="Before" afterTitle="After" />
     </details>}
     <Modal open={discard} title="Reload saved document content?" onClose={() => setDiscard(false)}>
       <p>Unsaved edits will be discarded. Compiled files and the submitted archive are not changed.</p>

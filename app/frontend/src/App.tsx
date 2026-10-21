@@ -1,7 +1,7 @@
 import { Component, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { QueryClientProvider } from '@tanstack/react-query';
-import { BrowserRouter, Link, Navigate, NavLink, Outlet, Route, Routes, useLocation } from 'react-router-dom';
+import { createBrowserRouter, createRoutesFromElements, Link, Navigate, NavLink, Outlet, Route, RouterProvider, useLocation } from 'react-router-dom';
 import { ApiError, initializeSession, retrySession } from './api';
 import { ActivityProvider, createQueryClient, NoticesProvider, useActivity, useApiQuery } from './query';
 import type { SettingsView, Workspace } from './types';
@@ -145,8 +145,8 @@ function Home() {
 }
 
 export function App() {
-  return <AppErrorBoundary><SessionGate><QueryClientProvider client={client}>
-    <BrowserRouter><NoticesProvider><ActivityProvider><Routes>
+  const [router] = useState(() => createBrowserRouter(createRoutesFromElements(
+    <Route element={<NoticesProvider><ActivityProvider><Outlet /></ActivityProvider></NoticesProvider>}>
       <Route element={<Layout />}>
         <Route index element={<Home />} /><Route path="/welcome" element={<WelcomePage />} />
         <Route path="/profile" element={<ProfilePage />} /><Route path="/jobs" element={<JobsPage />} />
@@ -156,6 +156,9 @@ export function App() {
         <Route path="*" element={<Panel><Empty title="This page isn’t in your workspace."
           action={<Link to="/" className="button button-primary">Go to overview</Link>}>Use the navigation to continue your search.</Empty></Panel>} />
       </Route>
-    </Routes></ActivityProvider></NoticesProvider></BrowserRouter>
+    </Route>,
+  )));
+  return <AppErrorBoundary><SessionGate><QueryClientProvider client={client}>
+    <RouterProvider router={router} />
   </QueryClientProvider></SessionGate></AppErrorBoundary>;
 }

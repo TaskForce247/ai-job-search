@@ -2,8 +2,9 @@ import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 import { ApprovalCard } from '../pages/Activity';
+import { RunOutcome } from '../components/RunOutcome';
 import type { Approval } from '../types';
-import { applicationFixture, approvalFixture } from './fixtures';
+import { applicationFixture, approvalFixture, runFixture } from './fixtures';
 import { fetchFixtures, json, renderApp } from './helpers';
 
 function review(overrides: Partial<Approval> = {}): Approval {
@@ -19,6 +20,15 @@ function review(overrides: Partial<Approval> = {}): Approval {
 }
 
 describe('Activity content review recovery', () => {
+  it.each([
+    { outcome: 'review_dismissed' },
+    { declined: true },
+  ])('labels dismissed document operations separately from successful preparation: %j', (result) => {
+    renderApp(<RunOutcome run={{ ...runFixture, kind: 'documents', status: 'succeeded', result }} />);
+    expect(screen.getByText('Review dismissed · documents unchanged')).not.toHaveClass('badge-positive');
+    expect(screen.queryByText('Completed')).not.toBeInTheDocument();
+  });
+
   it('offers AI edits and manual editing instead of only Keep saved draft', async () => {
     const fetch = fetchFixtures({
       '/api/v1/applications/application-1': { ...applicationFixture, revision: 'current-application-revision' },
@@ -27,7 +37,7 @@ describe('Activity content review recovery', () => {
       }, 202),
     });
     renderApp(<ApprovalCard approval={review()} runKind="documents" />);
-    expect(screen.getByRole('button', { name: 'Keep saved draft' })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Dismiss review · keep current text' })).toBeVisible();
     expect(screen.getByRole('link', { name: 'Edit draft manually' }))
       .toHaveAttribute('href', '/applications/application-1?tab=checks');
     expect(screen.getByText(/There is no checked correction to accept yet/)).toBeVisible();
@@ -59,7 +69,7 @@ describe('Activity content review recovery', () => {
     renderApp(<ApprovalCard approval={review()} />);
     await userEvent.setup().click(screen.getByRole('button', { name: 'Generate AI edits' }));
     expect(await screen.findByText('Document work is already in progress.')).toBeVisible();
-    expect(screen.getByRole('button', { name: 'Keep saved draft' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Dismiss review · keep current text' })).toBeEnabled();
     expect(screen.getByRole('button', { name: 'Generate AI edits' })).toBeEnabled();
   });
 
@@ -67,6 +77,20 @@ describe('Activity content review recovery', () => {
     fetchFixtures({});
     renderApp(<ApprovalCard approval={review({ status: 'rejected' })} />);
     expect(screen.queryByRole('button', { name: 'Generate AI edits' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Keep saved draft' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Dismiss review · keep current text' })).not.toBeInTheDocument();
+  });
+
+  it('dismisses review without claiming that preparation or verification completed', async () => {
+    const fetch = fetchFixtures({
+      '/api/v1/approvals/approval-1/decision': () => json({
+        run_id: 'run-1', application_id: 'application-1', outcome: 'review_dismissed',
+      }),
+    });
+    renderApp(<ApprovalCard approval={review()} runKind="documents" />);
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Dismiss review · keep current text' }));
+    expect(await screen.findByText(/Review dismissed. Saved documents are unchanged; verification has not advanced/)).toBeVisible();
+    expect(screen.queryByRole('link', { name: 'View progress →' })).not.toBeInTheDocument();
+    expect(fetch.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(1);
+    expect(fetch.mock.calls[0][0]).toBe('/api/v1/approvals/approval-1/decision');
   });
 });

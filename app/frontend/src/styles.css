@@ -477,3 +477,10 @@ dialog::backdrop { background: #1b2d2760; backdrop-filter: blur(3px); }
 .failure-diagnostics dt { font-weight: 600; }
 .failure-diagnostics dd { margin: 0; min-width: 0; }
 .failure-diagnostics ul { margin: 0; padding-left: 18px; }
+.revision-summary { padding: 1rem; border: 1px solid var(--border); border-radius: .75rem; }
+.revision-summary ul { margin: .5rem 0; padding-left: 1.25rem; }
+.diff-block { padding: .5rem; margin-bottom: .5rem; border-left: 3px solid transparent; }
+.diff-before { background: #fff1f0; border-left-color: #ad3434; }
+.diff-after { background: #eef8ef; border-left-color: #287a40; }
+.diff-label { display: block; font-size: .8rem; font-weight: 700; margin-bottom: .25rem; }
+.diff-block del, .diff-block ins { text-decoration: none; }

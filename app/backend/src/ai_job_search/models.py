@@ -411,9 +411,16 @@ class DocumentView(Model):
     revision: str
     stale: bool
     checks: list[Check]
+    compiled_revision: str | None = None
+    checks_revision: str | None = None
+    checked_at: str | None = None
+    checks_stale: bool = True
+    stale_reasons: list[str] = Field(default_factory=list)
+    checks_stale_reasons: list[str] = Field(default_factory=list)
     pdf_artifact_id: str | None = None
     source_artifact_id: str | None = None
     draft_pdf_artifact_id: str | None = None
+    draft_pdf_revision: str | None = None
     draft_pdf_stale: bool = False
     keyword_coverage: list[dict[str, JsonValue]] = Field(default_factory=list)
     model_config = ConfigDict(extra="allow")

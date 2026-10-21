@@ -719,7 +719,8 @@ class WorkflowService:
                     if any(check["status"] == "skipped" for check in checks):
                         current_revision = self.applications.save_checks(
                             run_id + f":checks:{cycle}:{kind}", application_id, checks_by_kind,
-                            expected_revision=current_revision,
+                            expected_revision=current_revision, input_hashes=expected,
+                            policy_hash=self.bundle(run_id)["hash"],
                         )
                         raise AppError("pdf_tool_missing", "Required layout verification is unavailable. Repair PDF tools in Settings; skipped is not verified.", 409,
                                        detail={"checks": checks})
@@ -747,6 +748,7 @@ class WorkflowService:
                     self.store.finish_step(step_id, {"checks": checks_by_kind[kind]}, status="failed")
             current_revision = self.applications.save_checks(
                 run_id + f":checks:{cycle}", application_id, checks_by_kind, expected_revision=current_revision,
+                input_hashes=expected, policy_hash=self.bundle(run_id)["hash"],
             )
             if not findings and len(outputs) == 2:
                 self.applications.publish(
@@ -847,6 +849,11 @@ class WorkflowService:
             if decision.decision in ("reject", "not_now"):
                 self.store.record_decision(approval_id, decision.decision, decision.expected_revision)
                 result = {"declined": True}
+                if approval["kind"] in ("document_review", "document_correction", "document_rewrite"):
+                    result.update(
+                        outcome="review_dismissed",
+                        message="Review dismissed. Saved documents are unchanged; no checks were started or marked passed.",
+                    )
                 if approval["proposal"].get("application_id"):
                     result["application_id"] = approval["proposal"]["application_id"]
                 self.store.finish(run_id, result)

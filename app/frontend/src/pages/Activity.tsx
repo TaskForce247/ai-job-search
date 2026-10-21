@@ -2,14 +2,15 @@ import { useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { api, artifactUrl, queryString } from '../api';
 import { RunFailure } from '../components/RunFailure';
+import { RunOutcome, isDismissedReview } from '../components/RunOutcome';
 import { isActiveRun, useAction, useActivity, useApiQuery, useNotices } from '../query';
 import type { ApiSchema, Application, Approval, DocumentKind, Page, Run, RunAccepted } from '../types';
 import { hasBlockingGate, ProposalView, StructuredDetails } from '../components/proposals';
 import { Alert, Badge, Button, Empty, ErrorPanel, Field, formatDate, humanize, Loading, Modal, PageHeader, Pager, Panel } from '../components/ui';
 
 function choiceLabel(choice: string, kind: string) {
-  if (kind.includes('document_correction')) return choice === 'approve' ? 'Accept corrections & continue' : 'Keep saved draft';
-  if (kind.includes('document_review') && choice === 'reject') return 'Keep saved draft';
+  if (kind.includes('document_correction')) return choice === 'approve' ? 'Accept corrections & continue' : 'Reject changes · keep current text';
+  if (kind.includes('document_review') && choice === 'reject') return 'Dismiss review · keep current text';
   if (choice === 'prepare') return 'Prepare application documents';
   if (choice === 'not_now') return 'Not now';
   if (choice === 'reject') return 'Reject proposal';
@@ -30,7 +31,7 @@ export function ApprovalCard({ approval, runKind = '', disabled = false, onEditI
 }) {
   const [confirmation, setConfirmation] = useState('');
   const navigate = useNavigate();
-  const { queued } = useNotices();
+  const { queued, notify } = useNotices();
   const kind = `${approval.kind} ${runKind}`.toLowerCase();
   const requiredConfirmation = kind.includes('restore') ? 'RESTORE' : kind.includes('reset') ? 'RESET' : '';
   const blocked = hasBlockingGate(approval.proposal);
@@ -54,11 +55,14 @@ export function ApprovalCard({ approval, runKind = '', disabled = false, onEditI
       confirmation: ['reject', 'not_now', 'cancel'].includes(decision) ? '' : confirmation,
     } satisfies ApiSchema<'Decision'>,
   }), (result, decision) => {
-    queued({ ...result, run_id: result.preparation_run_id || result.run_id }, approval.kind === 'document_correction' && decision === 'approve'
+    if (['reject', 'not_now'].includes(decision)) {
+      notify(contentReview || approval.kind === 'document_rewrite'
+        ? 'Review dismissed. Saved documents are unchanged; verification has not advanced. Use Resume checks when ready.'
+        : 'Decision recorded. The proposal was not applied.');
+    } else queued({ ...result, run_id: result.preparation_run_id || result.run_id }, approval.kind === 'document_correction' && decision === 'approve'
       ? 'Corrections accepted. Remaining checks queued; unchanged verified review checkpoints can be reused. No Profile facts were changed.'
       : decision === 'prepare'
       ? 'Document preparation queued. Read saved drafts in the application workspace; wait for verification before using PDFs. Nothing is sent.' :
-      ['reject', 'not_now'].includes(decision) ? 'Decision recorded. The proposal was not applied.' :
         'Decision recorded. Follow Activity to confirm the operation completes successfully.');
     setConfirmation('');
     if (result.application_id) navigate(`/applications/${encodeURIComponent(result.application_id)}${
@@ -73,7 +77,7 @@ export function ApprovalCard({ approval, runKind = '', disabled = false, onEditI
       {approval.status === 'pending' ? <div className="stack approval-actions">
         {approval.kind === 'document_review' && <p className="hint">
           There is no checked correction to accept yet. Generate AI edits to review a new proposal, or edit the saved draft manually.
-          “Keep saved draft” dismisses this review without fixing the issues.
+          Dismissing the review keeps the current text. It does not restore content, run checks or mark documents verified.
         </p>}
         {contentReview && applicationId && <>
           <ErrorPanel error={repair.error} />
@@ -144,8 +148,10 @@ function RunCard({ run }: { run: Run }) {
   return <Panel className={`run-card run-${run.status}`}>
     <div id={`run-${run.id}`} className="anchor-target" />
     <div className="section-heading"><div><p className="eyebrow">{humanize(run.kind)}</p>
-      <h2>{humanize(run.stage || run.status)}</h2></div><Badge value={run.status} /></div>
-    <p className="preserve-lines">{run.message || 'The operation has been recorded. Waiting for its next stage.'}</p>
+      <h2>{humanize(run.stage || run.status)}</h2></div><RunOutcome run={run} /></div>
+    <p className="preserve-lines">{isDismissedReview(run)
+      ? 'Review dismissed. Saved documents are unchanged; no checks were started or marked passed.'
+      : run.message || 'The operation has been recorded. Waiting for its next stage.'}</p>
     <div className="run-meta"><span>Started {formatDate(run.created_at, true)}</span>
       <span>Updated {formatDate(run.updated_at, true)}</span><span>API cost ${run.cost_usd.toFixed(2)}</span></div>
     <RunFailure run={run} />

@@ -2525,6 +2525,58 @@
             "type": "array",
             "title": "Checks"
           },
+          "compiled_revision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Compiled Revision"
+          },
+          "checks_revision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Checks Revision"
+          },
+          "checked_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Checked At"
+          },
+          "checks_stale": {
+            "type": "boolean",
+            "title": "Checks Stale",
+            "default": true
+          },
+          "stale_reasons": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Stale Reasons"
+          },
+          "checks_stale_reasons": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Checks Stale Reasons"
+          },
           "pdf_artifact_id": {
             "anyOf": [
               {
@@ -2557,6 +2609,17 @@
               }
             ],
             "title": "Draft Pdf Artifact Id"
+          },
+          "draft_pdf_revision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Draft Pdf Revision"
           },
           "draft_pdf_stale": {
             "type": "boolean",

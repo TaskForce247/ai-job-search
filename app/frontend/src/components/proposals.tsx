@@ -1,7 +1,7 @@
 import { Fragment, useState } from 'react';
 import { Link } from 'react-router-dom';
 import type { DocumentContent, DocumentKind } from '../types';
-import { ReadDocument } from './PdfPreview';
+import { DocumentComparison } from './DocumentComparison';
 import { Alert, Badge, Button, ExternalLink, formatDate, humanize } from './ui';
 
 export function asObject(value: unknown): Record<string, unknown> {
@@ -165,10 +165,7 @@ function RewriteComparison({ before, after, correction = false }: {
       <button aria-pressed={kind === 'cv'} onClick={() => setKind('cv')}>Compare CV</button>
       <button aria-pressed={kind === 'cover_letter'} onClick={() => setKind('cover_letter')}>Compare cover letter</button>
     </div>
-    <div className="comparison">
-      <section><h3>Before · saved draft</h3><ReadDocument content={before[kind] as DocumentContent} /></section>
-      <section><h3>After · proposed rewrite</h3><ReadDocument content={after[kind] as DocumentContent} /></section>
-    </div>
+    <DocumentComparison before={before[kind] as DocumentContent} after={after[kind] as DocumentContent} />
   </div>;
 }
 

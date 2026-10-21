@@ -212,6 +212,66 @@ describe('document-first application workspace', () => {
     expect(screen.getByRole('button', { name: 'Generate AI edits' })).toBeEnabled();
   });
 
+  it('shows text, PDF and check readiness separately and offers the relevant review action', async () => {
+    setup();
+    const summary = await screen.findByRole('region', { name: 'Document revisions' });
+    expect(summary).toHaveTextContent('saved text document');
+    expect(summary).toHaveTextContent('no verified PDF');
+    expect(summary).toHaveTextContent('never checked');
+    expect(summary).toHaveTextContent('A proposal is awaiting your decision');
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Review changes' }));
+    expect(screen.getByRole('region', { name: 'Application checks and corrections' })).toBeVisible();
+  });
+
+  it('offers a retry and the actual failure explanation for a technical AI-output failure', async () => {
+    const { state, client } = setup({ stopped: true });
+    await screen.findByRole('region', { name: 'Readable saved draft' });
+    state.application.content_issues = [];
+    state.runs['review-run'] = {
+      ...state.runs['review-run'], error_code: 'ai_incomplete_documents', error: 'AI output lost content.',
+      result: { ai_failure: { kind: 'invalid_output', title: 'The AI returned an incomplete document revision',
+        explanation: 'Your saved documents were not replaced.', remedy: 'Change the model before retrying.' } },
+    };
+    await act(async () => {
+      await client.refetchQueries({ queryKey: ['application'] });
+      await client.refetchQueries({ queryKey: ['run'] });
+    });
+    expect(screen.getByRole('button', { name: 'Retry verification' })).toBeEnabled();
+    expect(screen.getByText('Change the model before retrying.', { selector: 'p' })).toBeVisible();
+    expect(screen.getByText('Your saved documents were not replaced.', { selector: 'p' })).toBeVisible();
+  });
+
+  it('saves unsaved wording before starting checks with the fresh application revision', async () => {
+    const { fetch } = setup({ stopped: true });
+    const user = userEvent.setup();
+    await screen.findByRole('region', { name: 'Readable saved draft' });
+    await user.click(screen.getByRole('button', { name: 'Edit content' }));
+    await user.type(screen.getAllByLabelText('Body text')[0], ' Supported correction.');
+    await user.click(screen.getByRole('button', { name: 'Save & check' }));
+    await waitFor(() => expect(fetch.mock.calls.some(([url, init]) =>
+      String(url).endsWith('/document-runs') && init?.method === 'POST')).toBe(true));
+    const saves = fetch.mock.calls.filter(([, init]) => init?.method === 'PATCH');
+    expect(saves).toHaveLength(1);
+    const request = fetch.mock.calls.find(([url, init]) => String(url).endsWith('/document-runs') && init?.method === 'POST');
+    expect(JSON.parse(String(request?.[1]?.body)).expected_revision).toBe('application-r2');
+  });
+
+  it('never starts checks when saving current edits fails', async () => {
+    const { fetch } = setup({ stopped: true });
+    const originalFetch = fetch.getMockImplementation()!;
+    fetch.mockImplementation((input, init) => init?.method === 'PATCH'
+      ? Promise.resolve(json({ error: { code: 'revision_conflict', message: 'A newer saved document exists.' } }, 409))
+      : originalFetch(input, init));
+    const user = userEvent.setup();
+    await screen.findByRole('region', { name: 'Readable saved draft' });
+    await user.click(screen.getByRole('button', { name: 'Edit content' }));
+    await user.type(screen.getAllByLabelText('Body text')[0], ' Keep this edit.');
+    await user.click(screen.getByRole('button', { name: 'Save & check' }));
+    await waitFor(() => expect(screen.getAllByText('A newer saved document exists.').length).toBeGreaterThan(0));
+    expect(screen.getAllByLabelText('Body text')[0]).toHaveValue(`${savedWording} Keep this edit.`);
+    expect(fetch.mock.calls.some(([url, init]) => String(url).endsWith('/document-runs') && init?.method === 'POST')).toBe(false);
+  });
+
   it('generates a local draft PDF during pending review and exposes a clearly unverified download', async () => {
     const { fetch, client, state } = setup({ manual: true });
     const user = userEvent.setup();

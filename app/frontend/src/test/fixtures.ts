@@ -26,7 +26,7 @@ export const settingsFixture: SettingsView = {
 };
 
 export const documentFixture: DocumentView = {
-  revision: 'document-r1', stale: true, pdf_artifact_id: 'pdf-old', draft_pdf_stale: false,
+  revision: 'document-r1', stale: true, checks_stale: true, pdf_artifact_id: 'pdf-old', draft_pdf_stale: false,
   content: { language: 'English', blocks: [
     { id: 'block-1', kind: 'paragraph', text: 'Original paragraph.', heading: '', organization: '', location: '', start: '', end: '', evidence_ids: ['fact-1'], bullets: [] },
     { id: 'block-2', kind: 'heading', text: '', heading: 'Experience', organization: '', location: '', start: '', end: '', evidence_ids: [], bullets: [] },

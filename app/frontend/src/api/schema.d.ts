@@ -1020,12 +1020,29 @@ export interface components {
             stale: boolean;
             /** Checks */
             checks: components["schemas"]["Check"][];
+            /** Compiled Revision */
+            compiled_revision?: string | null;
+            /** Checks Revision */
+            checks_revision?: string | null;
+            /** Checked At */
+            checked_at?: string | null;
+            /**
+             * Checks Stale
+             * @default true
+             */
+            checks_stale: boolean;
+            /** Stale Reasons */
+            stale_reasons?: string[];
+            /** Checks Stale Reasons */
+            checks_stale_reasons?: string[];
             /** Pdf Artifact Id */
             pdf_artifact_id?: string | null;
             /** Source Artifact Id */
             source_artifact_id?: string | null;
             /** Draft Pdf Artifact Id */
             draft_pdf_artifact_id?: string | null;
+            /** Draft Pdf Revision */
+            draft_pdf_revision?: string | null;
             /**
              * Draft Pdf Stale
              * @default false

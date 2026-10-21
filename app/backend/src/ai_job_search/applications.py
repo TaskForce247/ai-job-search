@@ -264,9 +264,36 @@ class ApplicationService:
                 for extension, artifact in (("pdf", "pdf_artifact_id"), ("tex", "source_artifact_id"))
                 if data.get(artifact) and data.get(extension + "_path")
             )
+            stale_reasons = []
+            if not data.get("compiled_revision"):
+                stale_reasons.append("No verified PDF has been recorded for this document.")
+            elif data["compiled_revision"] != revision:
+                stale_reasons.append("The saved text changed after the PDF was verified.")
+            if inputs_changed:
+                stale_reasons.append("The profile or workflow rules changed after PDF verification.")
+            if artifacts_changed:
+                stale_reasons.append("A generated PDF or source file changed outside the app.")
+            checks_revision = data.get("checks_revision", data.get("compiled_revision"))
+            checks_reasons = []
+            if not checks_revision:
+                checks_reasons.append("The previous results are not linked to a saved text revision.")
+            elif checks_revision != revision:
+                checks_reasons.append("The saved text changed after these checks.")
+            hashes = data.get("checks_profile_hashes", profile_hashes)
+            if hashes and self.workspace.snapshot(list(hashes)) != hashes:
+                checks_reasons.append("The profile changed after these checks.")
+            policy_hash = data.get("checks_policy_hash", manifest.get("policy_hash"))
+            if policy_hash:
+                from .policy import Policy
+                if Policy(self.workspace).bundle("apply")["hash"] != policy_hash:
+                    checks_reasons.append("The workflow rules changed after these checks.")
+            if artifacts_changed:
+                checks_reasons.append("A checked PDF or source file changed outside the app.")
             result[kind] = {
                 **data, "content": content.model_dump(mode="json"), "revision": revision,
                 "stale": data.get("compiled_revision") != revision or inputs_changed or artifacts_changed,
+                "stale_reasons": stale_reasons, "checks_revision": checks_revision,
+                "checks_stale": bool(checks_reasons), "checks_stale_reasons": checks_reasons,
                 "checks": data.get("checks", []),
             }
         return result
@@ -312,6 +339,7 @@ class ApplicationService:
                         hashes = result["profile_hashes"]
                         document.update(
                             draft_pdf_artifact_id=artifact["id"],
+                            draft_pdf_revision=result["document_revision"],
                             draft_pdf_stale=(
                                 result["document_revision"] != document["revision"]
                                 or self.workspace.snapshot(list(hashes)) != hashes
@@ -421,8 +449,6 @@ class ApplicationService:
                 raise AppError("revision_conflict", "The document changed. Reload before saving.", 409)
             document = manifest["documents"][kind]
             document["content"] = content.model_dump(mode="json")
-            document["checks"] = [{"id": "revision", "label": "Current revision", "status": "pending",
-                                   "message": "Edited text needs review, compilation, and verification."}]
             self.workspace.commit(operation_id, {relative: encoded(manifest).encode("utf-8")},
                                   expected)
         return self.get(application_id)["documents"][kind]
@@ -447,14 +473,19 @@ class ApplicationService:
             return self.get(application_id)["revision"]
 
     def save_checks(self, operation_id: str, application_id: str, checks: dict[str, list[dict]], *,
-                    expected_revision: str) -> str:
+                    expected_revision: str, input_hashes: dict[str, str | None],
+                    policy_hash: str) -> str:
         with self.workspace.lock():
             application, relative, manifest, expected = self._edit_snapshot(application_id)
             if application["revision"] != expected_revision:
                 raise AppError("external_edit", "The documents changed during verification. Reload before retrying.", 409)
             for kind, values in checks.items():
                 if kind in manifest.get("documents", {}):
-                    manifest["documents"][kind]["checks"] = values
+                    document = manifest["documents"][kind]
+                    document.update(
+                        checks=values, checks_revision=digest(document["content"]), checked_at=now(),
+                        checks_profile_hashes=input_hashes, checks_policy_hash=policy_hash,
+                    )
             self.workspace.commit(operation_id, {relative: encoded(manifest).encode("utf-8")},
                                   expected)
             return self.get(application_id)["revision"]
@@ -498,6 +529,8 @@ class ApplicationService:
                     document[extension + "_path"] = relative
                 document["compiled_revision"] = digest(document["content"])
                 document["checks"] = files["checks"]
+                document.update(checks_revision=digest(document["content"]), checked_at=now(),
+                                checks_profile_hashes=input_hashes, checks_policy_hash=policy_hash)
                 document["keyword_coverage"] = files.get("keyword_coverage", [])
             manifest["policy_hash"] = policy_hash
             manifest["profile_hashes"] = input_hashes

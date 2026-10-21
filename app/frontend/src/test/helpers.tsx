@@ -1,7 +1,8 @@
 import type { ReactNode } from 'react';
+import { createContext, useContext } from 'react';
 import { render } from '@testing-library/react';
 import { QueryClientProvider } from '@tanstack/react-query';
-import { MemoryRouter } from 'react-router-dom';
+import { createMemoryRouter, RouterProvider } from 'react-router-dom';
 import { vi } from 'vitest';
 import { ActivityProvider, createQueryClient, NoticesProvider } from '../query';
 import { setCsrfToken } from '../api';
@@ -23,15 +24,25 @@ export function fetchFixtures(handlers: Record<string, Handler>) {
   return mock;
 }
 
-export function renderApp(ui: ReactNode, options: { route?: string; activity?: boolean } = {}) {
+const TestContent = createContext<ReactNode>(null);
+
+function RenderTestContent() {
+  return useContext(TestContent);
+}
+
+export function renderApp(ui: ReactNode, options: { route?: string; activity?: boolean; entries?: string[] } = {}) {
   setCsrfToken('test-csrf-token');
   const client = createQueryClient();
   client.setDefaultOptions({ queries: { retry: false, gcTime: 0 }, mutations: { retry: false } });
+  const content = <RenderTestContent />;
+  const router = createMemoryRouter([{ path: '*', element: <NoticesProvider>
+    {options.activity ? <ActivityProvider>{content}</ActivityProvider> : content}</NoticesProvider> }],
+  { initialEntries: options.entries ?? [options.route ?? '/'] });
   function Wrapper({ children }: { children: ReactNode }) {
-    return <QueryClientProvider client={client}><MemoryRouter initialEntries={[options.route ?? '/']}>
-      <NoticesProvider>{options.activity ? <ActivityProvider>{children}</ActivityProvider> : children}</NoticesProvider>
-    </MemoryRouter></QueryClientProvider>;
+    return <TestContent.Provider value={children}><QueryClientProvider client={client}>
+      <RouterProvider router={router} />
+    </QueryClientProvider></TestContent.Provider>;
   }
   const result = render(ui, { wrapper: Wrapper });
-  return { ...result, client };
+  return { ...result, client, router };
 }

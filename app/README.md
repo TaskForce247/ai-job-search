@@ -173,6 +173,25 @@ pending. Review its before/after comparison and accept or reject it: generating
 edits alone never replaces the saved drafts or confirms missing facts. Existing
 rewrite proposals still need a decision before another can be started.
 
+The document workspace identifies saved text, verified PDFs, unverified previews
+and pending proposals separately using short revision references. Check results
+retain their previous explanations when they become outdated; fresh failed
+checks are distinguished from an older verified PDF. Keyword coverage remains
+outdated until a verified PDF for the current text is available.
+
+**Dismiss review · keep current text** only closes the review. It does not
+restore text, start checks or verify documents. Activity shows a dismissed
+review as such, not as successful preparation. The next-step action offers
+proposal review, **Save & check**, verification or verified downloads as appropriate.
+**Save & check** saves edits first, then binds the new checks to the updated
+application revision. Proposed edits highlight replaced and added blocks and
+explicitly identify unchanged wording, including evidence-only changes.
+
+Unsaved document edits trigger a confirmation before navigating away, including
+browser back/forward navigation. Reloading or closing the tab uses the browser's
+native unsaved-change warning. Choosing to discard affects unsaved edits only;
+saved documents and submitted archives remain intact.
+
 The workspace shows the recorded API cost across document attempts and the
 configured limit for the next operation. Acceptance and continuation can still
 use the AI connection; interrupted requests may have unrecorded provider charges.

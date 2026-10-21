@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { api, artifactUrl, queryString } from '../api';
@@ -6,8 +6,10 @@ import { isActiveRun, useAction, useActivity, useApiQuery, useNotices } from '..
 import type { ApiSchema, Application, DocumentKind, DocumentView, Page, ProfileView, Run, RunAccepted } from '../types';
 import { outcomeStatuses } from '../types';
 import { DocumentChecks, DocumentEditor, isVerifiedDocument } from '../components/DocumentEditor';
+import type { DocumentEditorHandle } from '../components/DocumentEditor';
 import { AIReadinessNote } from '../components/SetupControls';
 import { RunFailure } from '../components/RunFailure';
+import { RunOutcome, isDismissedReview } from '../components/RunOutcome';
 import { DocumentIssues, EvaluationView } from '../components/proposals';
 import { Alert, Badge, Button, Empty, ErrorPanel, ExternalLink, Field, formatDate, humanize, Loading, Modal, PageHeader, Pager, Panel, safeUrl, today } from '../components/ui';
 import { ApprovalCard, RunActions } from './Activity';
@@ -200,6 +202,7 @@ export function ApplicationDetailPage() {
   const [checksOpen, setChecksOpen] = useState(params.get('tab') === 'checks');
   const [editIssue, setEditIssue] = useState<{ kind: DocumentKind; blockId?: string; request: number }>();
   const [dirty, setDirty] = useState(false);
+  const editor = useRef<DocumentEditorHandle>(null);
   const [switchTo, setSwitchTo] = useState<DocumentKind | null>(null);
   const [instruction, setInstruction] = useState('');
   const application = applicationQuery.data;
@@ -228,6 +231,16 @@ export function ApplicationDetailPage() {
         'Remaining checks queued. Saved drafts are retained; only unchanged, successful review checkpoints can be reused. PDFs are not ready until verification passes.');
       setInstruction('');
     });
+  const saveAndCheck = useAction(async () => {
+    if (!editor.current) throw new Error('Open the document before saving.');
+    await editor.current.save();
+    const current = await api<Application>(`/applications/${encodeURIComponent(id)}`);
+    return api<RunAccepted>(`/applications/${encodeURIComponent(id)}/document-runs`, {
+      method: 'POST', body: {
+        expected_revision: current.revision, instruction: '', repair: false, resume_from: lastRunId ?? null,
+      } satisfies ApiSchema<'DocumentRunInput'>,
+    });
+  }, (run) => queued(run, 'Edits saved and checks queued for the new saved revision. AI charges may apply.'));
   const pdfAction = useAction((documentKind: DocumentKind) => {
     if (!application) throw new Error('Wait for the application to finish loading.');
     return api<RunAccepted>(`/applications/${encodeURIComponent(id)}/documents/${documentKind}/pdf-runs`, {
@@ -258,7 +271,7 @@ export function ApplicationDetailPage() {
   const view = document.data ?? application.documents[kind];
   const runBusy = ['queued', 'running'].includes(relatedRun?.status ?? lastRun.data?.status ?? '') ||
     activity.allRuns.some((run) => run.kind === 'document_pdf' && run.input.application_id === id && ['queued', 'running'].includes(run.status)) ||
-    ['queued', 'running'].includes(pdfRun.data?.status ?? '') || pdfAction.isPending || repairAction.isPending || documentsAction.isPending;
+    ['queued', 'running'].includes(pdfRun.data?.status ?? '') || pdfAction.isPending || repairAction.isPending || documentsAction.isPending || saveAndCheck.isPending;
   const pending = lastRun.data?.approvals.filter((approval) => approval.status === 'pending') ?? [];
   const hasPair = !!application.documents.cv && !!application.documents.cover_letter;
   const verified = hasPair && !dirty && Object.values(application.documents).every((value) => value && isVerifiedDocument(value));
@@ -269,6 +282,7 @@ export function ApplicationDetailPage() {
   const currentProposal = pending.some((approval) => approval.proposal.expected_revision === application.revision);
   const editProposalPending = pending.some((approval) => approval.kind === 'document_rewrite');
   const editsDisabled = dirty || !hasPair || runBusy || editProposalPending;
+  const retrying = ['failed', 'interrupted', 'cancelled'].includes(lastRun.data?.status ?? '');
   function choose(next: DocumentKind) {
     setChecksOpen(false);
     if (next === kind) return;
@@ -289,13 +303,46 @@ export function ApplicationDetailPage() {
     <Panel title="Application documents" className="application-documents">
       <div className="actions"><Badge value={verified ? 'verified' : needsReview ? 'needs_review' : runBusy ? 'running' : 'unverified'} />
         <p className="hint">Saved text stays available while checks run or need attention. Nothing is submitted automatically.</p></div>
+      <section aria-label="Document revisions" className="revision-summary">
+        <strong>What is current?</strong>
+        <ul>{Object.entries(application.documents).map(([name, value]) => value && <li key={name}>
+          <strong>{name === 'cv' ? 'CV' : 'Cover letter'}:</strong> saved text <code>{value.revision.slice(0, 8)}</code>
+          {dirty && name === kind && ' · unsaved edits'}
+          {' · '}{value.compiled_revision
+            ? <>verified PDF from text <code>{value.compiled_revision.slice(0, 8)}</code>{value.stale ? ' (outdated)' : ' (current)'}</>
+            : 'no verified PDF'}
+          {' · '}{value.checks.length ? (value.checks_stale ?? value.stale) ? 'previous checks are outdated' : 'checks match saved text' : 'never checked'}
+          {value.draft_pdf_artifact_id && <> · unverified preview{value.draft_pdf_revision &&
+            <> from text <code>{value.draft_pdf_revision.slice(0, 8)}</code></>}{value.draft_pdf_stale ? ' (outdated)' : ' (current)'}</>}
+          {value.compiled_revision && value.stale && !!value.stale_reasons?.length &&
+            <p className="hint">{value.stale_reasons.join(' ')}</p>}
+        </li>)}</ul>
+        {currentProposal && <p>A proposal is awaiting your decision. It has not replaced your saved text.</p>}
+        <p className="hint">Revision references identify exact text versions, not a count of edits.</p>
+      </section>
+      <section aria-label="Next step" className="actions">
+        {dirty ? <Button busy={saveAndCheck.isPending} disabled={!hasPair || (runBusy && !saveAndCheck.isPending)}
+          onClick={() => saveAndCheck.mutate()}>Save & check</Button>
+          : runBusy ? <span role="status">Work is in progress. Your saved text remains available.</span>
+            : currentProposal ? <Button onClick={() => setChecksOpen(true)}>Review changes</Button>
+              : needsReview ? <Button onClick={() => setChecksOpen(true)}>Review issues</Button>
+              : verified ? <>
+                <a className="button button-primary" href={artifactUrl(application.documents.cv!.pdf_artifact_id!)} download>Download verified CV</a>
+                <a className="button button-secondary" href={artifactUrl(application.documents.cover_letter!.pdf_artifact_id!)} download>Download verified cover letter</a>
+              </> : <Button disabled={!hasPair} busy={documentsAction.isPending}
+                onClick={() => { setChecksOpen(true); documentsAction.mutate(''); }}>
+                {retrying ? 'Retry verification' : 'Check saved documents'}
+              </Button>}
+        {currentProposal && !dirty && <span className="hint">Accept or dismiss the pending proposal before continuing checks.</span>}
+      </section>
+      <ErrorPanel error={saveAndCheck.error} />
       <div className="document-topbar">
         <div className="segmented" role="group" aria-label="Document selection">
           <button aria-pressed={!checksOpen && kind === 'cv'} onClick={() => choose('cv')}>CV</button>
           <button aria-pressed={!checksOpen && kind === 'cover_letter'} onClick={() => choose('cover_letter')}>Cover letter</button>
           <button aria-pressed={checksOpen} onClick={() => setChecksOpen(true)}>Checks{issues.length ? ` (${issues.length})` : ''}</button>
         </div>
-        <Button busy={documentsAction.isPending} disabled={dirty || !hasPair || runBusy || currentProposal}
+        <Button variant="secondary" busy={documentsAction.isPending} disabled={dirty || !hasPair || runBusy || currentProposal}
           onClick={() => { setChecksOpen(true); documentsAction.mutate(''); }}>Resume checks</Button>
       </div>
       <p className="hint">Resume checks may use your configured AI connection
@@ -332,7 +379,7 @@ export function ApplicationDetailPage() {
       <ErrorPanel error={profile.error} retry={() => void profile.refetch()} />
       {document.isPending && hasDocument && <Loading label="Loading document blocks…" />}
       <div hidden={checksOpen}>
-      {view ? <DocumentEditor key={`${id}-${kind}`} applicationId={id} kind={kind} view={view} initialPane="read"
+      {view ? <DocumentEditor ref={editor} key={`${id}-${kind}`} applicationId={id} kind={kind} view={view} initialPane="read"
         focusBlockId={editIssue?.kind === kind ? editIssue.blockId : undefined}
         editRequest={editIssue?.kind === kind ? editIssue.request : undefined}
         evidence={profile.data?.evidence ?? []} onDirtyChange={setDirty} /> : <Empty title={runBusy ? 'Your documents are being prepared.' : 'No document content yet.'}>
@@ -346,7 +393,9 @@ export function ApplicationDetailPage() {
       {checksOpen && <section id="checks" className="stack" aria-label="Application checks and corrections">
         <ul className="preparation-checklist" aria-label="Preparation checklist">
           <li><Badge value={hasPair ? 'pass' : 'pending'} /> Draft text saved</li>
-          <li><Badge value={verified ? 'pass' : 'pending'} /> Independent factual & company review</li>
+          <li><Badge value={verified ? 'pass' : 'pending'}>
+            {!verified && application.review_checkpoint_available ? 'Saved review · needs revalidation' : undefined}
+          </Badge> Independent factual & company review</li>
           <li><Badge value={application.documents.cv && isVerifiedDocument(application.documents.cv) && !dirty ? 'pass' : 'pending'} /> CV PDF checks</li>
           <li><Badge value={application.documents.cover_letter && isVerifiedDocument(application.documents.cover_letter) && !dirty ? 'pass' : 'pending'} /> Cover letter PDF checks</li>
         </ul>
@@ -366,7 +415,7 @@ export function ApplicationDetailPage() {
         {!pending.length && <DocumentIssues issues={issues} evidence={profile.data?.evidence} onEditIssue={editFinding}
           onGenerateEdits={() => repairAction.mutate()} disabled={runBusy} generateEditsDisabled={editsDisabled} />}
         {Object.entries(application.documents).map(([name, value]) => value && <section key={name}>
-          <h3>{name === 'cv' ? 'CV' : 'Cover letter'}</h3><DocumentChecks view={value} stale={value.stale || dirty}
+          <h3>{name === 'cv' ? 'CV' : 'Cover letter'}</h3><DocumentChecks view={value} stale={(value.checks_stale ?? value.stale) || (dirty && name === kind)}
             onGenerateEdits={() => repairAction.mutate()} disabled={editsDisabled} />
         </section>)}
         <p className="hint">AI edits use the failed checks and confirmed profile evidence. They may incur API charges and
@@ -388,9 +437,12 @@ export function ApplicationDetailPage() {
     {lastRun.isPending && lastRunId && <Loading label="Checking document operation…" />}
     <ErrorPanel error={lastRun.error} retry={() => void lastRun.refetch()} />
     {lastRun.data && <Panel title="Latest operation">
-      <div className="actions"><Badge value={needsReview ? 'needs_review' : lastRun.data.status} />
+      <div className="actions">{isDismissedReview(lastRun.data) ? <RunOutcome run={lastRun.data} />
+        : <Badge value={needsReview ? 'needs_review' : lastRun.data.status} />}
         <strong>{humanize(lastRun.data.stage || lastRun.data.kind)}</strong></div>
-      <p>{lastRun.data.message}</p>{lastRun.data.error && <Alert tone={legacyContentFailure ? 'warning' : 'danger'}>{lastRun.data.error}</Alert>}
+      <p>{isDismissedReview(lastRun.data)
+        ? 'Review dismissed. Saved documents are unchanged; verification has not advanced.' : lastRun.data.message}</p>
+      <RunFailure run={lastRun.data} />
       <p><Link to={`/activity#run-${encodeURIComponent(lastRun.data.id)}`}>Review operation & decisions →</Link></p>
       <RunActions run={lastRun.data} />
     </Panel>}
