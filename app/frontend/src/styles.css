@@ -484,3 +484,5 @@ dialog::backdrop { background: #1b2d2760; backdrop-filter: blur(3px); }
 .diff-after { background: #eef8ef; border-left-color: #287a40; }
 .diff-label { display: block; font-size: .8rem; font-weight: 700; margin-bottom: .25rem; }
 .diff-block del, .diff-block ins { text-decoration: none; }
+.ai-exchange-debug > .stack { margin-top: 1rem; }
+.ai-debug-text { max-height: 32rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }

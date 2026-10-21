@@ -19,6 +19,7 @@ from .documents import DocumentService, EvidenceFinding
 from .errors import AppError
 from .jobs import JobService
 from .models import (
+    COMPANY_CLAIMS_DESCRIPTION,
     CompanyResearch,
     Decision,
     DocumentContent,
@@ -117,7 +118,7 @@ class WorkflowService:
         result = await self.runtime.generate(
             run_id, stage, data, bundle, schema, settings,
             self.workspace.path(str(Path(".app", "runs", run_id, "runtime-" + digest(stage)[:16]))),
-            images=images, company_search=company_search,
+            images=images, company_search=company_search, trace_id=step_id,
         )
         self.store.finish_step(step_id, result.model_dump(mode="json"))
         return result
@@ -507,6 +508,7 @@ class WorkflowService:
         data = {
             "profile": profile.data.model_dump(mode="json"), "evidence": evidence, "evaluation": evaluation,
             "posting": application["posting"], "company": application["company"], "role": application["role"],
+            "company_claim_scope": COMPANY_CLAIMS_DESCRIPTION,
             "rendering_contract": "The renderer supplies the CV name/contact header and the cover-letter name/contact, employer and date. "
                                   "Return body blocks only: do not duplicate those headers. Keep greeting, closing and signature in cover-letter body blocks. "
                                   "Use entry blocks for CV experience/education and bullet blocks or nested bullets for achievements.",
@@ -653,6 +655,8 @@ class WorkflowService:
                     continue
                 final_grounding = await self.ai(run_id, f"grounding_{cycle}", {
                     "profile": data["profile"], "evidence": evidence, "final_documents": pair.model_dump(mode="json"),
+                    "posting": application["posting"], "role": application["role"],
+                    "company_claim_scope": COMPANY_CLAIMS_DESCRIPTION,
                     "verified_company_research": company.model_dump(mode="json"),
                     "scope": "candidate_claims_in_final_documents_only",
                     "task": "Independently audit candidate claims in final_documents against the approved evidence, not just cited IDs. supported concerns ONLY candidate claims actually present in those documents. Reject inflated titles, dates, metrics, ownership, skills or training. Do not audit an earlier evaluation, posting or other internal prose. Company verification is a separate stage; do not fail candidate grounding because this stage has no web tools. Enumerate target-employer claims verbatim in company_claims so any omitted claim can be separately verified before the final gate. Report blocking problems as issues with document, block_id, exact quote, supporting evidence_ids, message and conservative suggestion. Set needs_confirmation only if a genuinely missing or contradictory candidate fact cannot safely be removed or downgraded. findings contains blocking problems only; positive observations belong in notes. Never confirm a new profile fact.",

@@ -556,7 +556,9 @@ def test_company_claims_are_verified_before_candidate_grounding(confirmed, fixtu
                 result.revised.cover_letter.blocks[1].text += " " + claim
                 order.append("review")
             if stage.startswith("grounding_"):
-                assert "evaluation" not in data and "posting" not in data
+                assert "evaluation" not in data
+                assert data["posting"]
+                assert "application role title" in data["company_claim_scope"]
                 assert data["scope"] == "candidate_claims_in_final_documents_only"
                 assert data["verified_company_research"]["sources"][0]["claim"] == claim
                 order.append("grounding")

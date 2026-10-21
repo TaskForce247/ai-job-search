@@ -18,6 +18,7 @@ from starlette.exceptions import HTTPException
 from starlette.staticfiles import StaticFiles
 
 from . import __version__
+from .ai_debug import trace_detail, trace_index
 from .applications import FINAL, ApplicationService
 from .backups import MAX_ARCHIVE, BackupService
 from .config import Config
@@ -26,6 +27,8 @@ from .jobs import JobService
 from .models import (
     AcceptedInput,
     AIConnection,
+    AITraceDetail,
+    AITraceSummary,
     ApplicationInput,
     ApplicationView,
     BackupInput,
@@ -627,6 +630,14 @@ def create_app(config: Config | None = None, *, on_shutdown: Callable[[], None] 
     @app.get(PREFIX + "/runs/{run_id}", response_model=RunView)
     def run(run_id: str):
         return ws().store.run(run_id)
+
+    @app.get(PREFIX + "/runs/{run_id}/ai-traces", response_model=list[AITraceSummary])
+    def ai_traces(run_id: str):
+        return trace_index(ws(), run_id)
+
+    @app.get(PREFIX + "/runs/{run_id}/ai-traces/{trace_id}", response_model=AITraceDetail)
+    def ai_trace(run_id: str, trace_id: str):
+        return trace_detail(ws(), run_id, trace_id)
 
     @app.get(PREFIX + "/runs/{run_id}/events")
     def events(run_id: str, request: Request, after: int = Query(0, ge=0)):

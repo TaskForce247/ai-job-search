@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { api, artifactUrl, queryString } from '../api';
 import { RunFailure } from '../components/RunFailure';
+import { AIExchangeDebug } from '../components/AIExchangeDebug';
 import { RunOutcome, isDismissedReview } from '../components/RunOutcome';
 import { isActiveRun, useAction, useActivity, useApiQuery, useNotices } from '../query';
 import type { ApiSchema, Application, Approval, DocumentKind, Page, Run, RunAccepted } from '../types';
@@ -167,6 +168,7 @@ function RunCard({ run }: { run: Run }) {
       {run.artifacts.map((artifact) => <a key={artifact.id} href={artifactUrl(artifact.id)} download>
         Download {artifact.label || artifact.name || humanize(artifact.kind || 'file')}</a>)}</div>}
     <RunActions run={run} />
+    <AIExchangeDebug run={run} />
     <details><summary>Operation details & previous decisions</summary>
       <p className="hint">Operation reference: {run.id}</p>
       <h3>Approved inputs</h3><StructuredDetails value={run.input} />

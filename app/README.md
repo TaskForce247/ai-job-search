@@ -198,6 +198,28 @@ use the AI connection; interrupted requests may have unrecorded provider charges
 **Latest operation** includes stopped attempts, and Activity links to both drafts
 even if the operation failed. None of these actions submits an application.
 
+### Debugging AI exchanges
+
+Expand **AI prompts & responses (debug)** in an Activity operation or the
+application's **Latest operation** panel. Select a stage to inspect the full
+application-supplied system/user prompts, output schema, model and tool settings,
+public AI replies, search/tool messages and raw structured result, including
+rejected results. **Refresh exchanges** reloads progress without making an AI
+request; **Copy exchange** copies the selected record.
+
+New exchanges are saved locally in the workspace database and included in
+backups. They contain personal profile and application text: review them before
+sharing. Provider credentials are redacted, private reasoning is excluded, and
+image attachments are represented by hashes and sizes. SDK-added instructions
+are not captured. Older operations show explicitly labelled **Legacy snapshot**
+records with saved inputs and validated outputs where available; missing raw
+replies cannot be recovered. Reused checkpoints do not make a new AI request.
+
+Independent employer research is for factual assertions about the employer's
+business, products or operations, not candidate intentions or application titles.
+Explicit summaries of posting requirements are checked against the supplied
+posting; they are not independent evidence for broader company assertions.
+
 ## Alternative: one server with a built frontend
 
 For ordinary use without hot reload, build the frontend once, then run only

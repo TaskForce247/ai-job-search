@@ -242,12 +242,21 @@ class ResearchSource(Model):
     quote: Text
 
 
+COMPANY_CLAIMS_DESCRIPTION = (
+    "Verbatim factual assertions about the target employer's products, technology, partnerships, "
+    "business or operations in the final documents. Exclude candidate history, intentions and fit judgments; "
+    "the application role title; and explicitly attributed summaries of posting duties or requirements. "
+    "Check posting summaries against the supplied posting instead. Unattributed employer assertions still "
+    "require independent research; do not relabel them as posting summaries."
+)
+
+
 class Review(Model):
     findings: list[ReviewFinding] = Field(default_factory=list, max_length=80)
     sources: list[ResearchSource] = Field(default_factory=list, max_length=8)
     company_claims: list[Text] = Field(
         default_factory=list, max_length=8,
-        description="Every factual claim about the target employer in the revised documents, verbatim. Exclude the candidate's employment history.",
+        description=COMPANY_CLAIMS_DESCRIPTION,
     )
     assessment_warnings: list[Text] = Field(default_factory=list, max_length=30)
     revised: DraftPair
@@ -279,7 +288,7 @@ class GroundingReview(Model):
     issues: list[DocumentIssue] = Field(default_factory=list, max_length=60)
     notes: list[Text] = Field(default_factory=list, max_length=30)
     assessment_warnings: list[Text] = Field(default_factory=list, max_length=30)
-    company_claims: list[Text] = Field(default_factory=list, max_length=8)
+    company_claims: list[Text] = Field(default_factory=list, max_length=8, description=COMPANY_CLAIMS_DESCRIPTION)
 
 
 class CompanyResearch(Model):
@@ -489,6 +498,20 @@ class ApprovalView(Model):
     choices: list[str]
     proposal: dict[str, JsonValue]
     model_config = ConfigDict(extra="allow")
+
+
+class AITraceSummary(Model):
+    id: str
+    stage: str
+    created_at: str
+    status: str
+    source: Literal["captured", "legacy_snapshot"]
+
+
+class AITraceDetail(AITraceSummary):
+    request: dict[str, JsonValue]
+    responses: list[JsonValue]
+    note: str
 
 
 class RunView(Model):

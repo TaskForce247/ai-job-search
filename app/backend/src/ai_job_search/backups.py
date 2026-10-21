@@ -173,6 +173,8 @@ class BackupService:
                          "WHERE name NOT GLOB 'sqlite_autoindex_*' AND name<>'sqlite_sequence' ORDER BY name")
                 actual_schema = connection.execute(query).fetchall()
                 expected_schema = expected_database.execute(query).fetchall()
+                if not any(row[1] == "ai_traces" for row in actual_schema):
+                    expected_schema = [row for row in expected_schema if row[2] != "ai_traces"]
                 version = connection.execute("PRAGMA user_version").fetchone()[0]
                 integrity = connection.execute("PRAGMA integrity_check").fetchone()[0]
                 if version != 1 or integrity != "ok" or actual_schema != expected_schema:

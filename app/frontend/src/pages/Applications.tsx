@@ -9,6 +9,7 @@ import { DocumentChecks, DocumentEditor, isVerifiedDocument } from '../component
 import type { DocumentEditorHandle } from '../components/DocumentEditor';
 import { AIReadinessNote } from '../components/SetupControls';
 import { RunFailure } from '../components/RunFailure';
+import { AIExchangeDebug } from '../components/AIExchangeDebug';
 import { RunOutcome, isDismissedReview } from '../components/RunOutcome';
 import { DocumentIssues, EvaluationView } from '../components/proposals';
 import { Alert, Badge, Button, Empty, ErrorPanel, ExternalLink, Field, formatDate, humanize, Loading, Modal, PageHeader, Pager, Panel, safeUrl, today } from '../components/ui';
@@ -445,6 +446,7 @@ export function ApplicationDetailPage() {
       <RunFailure run={lastRun.data} />
       <p><Link to={`/activity#run-${encodeURIComponent(lastRun.data.id)}`}>Review operation & decisions →</Link></p>
       <RunActions run={lastRun.data} />
+      <AIExchangeDebug run={lastRun.data} />
     </Panel>}
     {application.evaluation && <Panel title="Why this role"><details><summary>Full fit assessment</summary>
       <EvaluationView value={application.evaluation} /></details></Panel>}

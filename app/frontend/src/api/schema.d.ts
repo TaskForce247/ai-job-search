@@ -537,6 +537,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/runs/{run_id}/ai-traces": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Ai Traces */
+        get: operations["ai_traces_api_v1_runs__run_id__ai_traces_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/runs/{run_id}/ai-traces/{trace_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Ai Trace */
+        get: operations["ai_trace_api_v1_runs__run_id__ai_traces__trace_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/runs/{run_id}/events": {
         parameters: {
             query?: never;
@@ -681,6 +715,46 @@ export interface components {
         AIConnection: {
             /** Api Key */
             api_key: string;
+        };
+        /** AITraceDetail */
+        AITraceDetail: {
+            /** Id */
+            id: string;
+            /** Stage */
+            stage: string;
+            /** Created At */
+            created_at: string;
+            /** Status */
+            status: string;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "captured" | "legacy_snapshot";
+            /** Request */
+            request: {
+                [key: string]: components["schemas"]["JsonValue"];
+            };
+            /** Responses */
+            responses: components["schemas"]["JsonValue"][];
+            /** Note */
+            note: string;
+        };
+        /** AITraceSummary */
+        AITraceSummary: {
+            /** Id */
+            id: string;
+            /** Stage */
+            stage: string;
+            /** Created At */
+            created_at: string;
+            /** Status */
+            status: string;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "captured" | "legacy_snapshot";
         };
         /** AcceptedInput */
         AcceptedInput: {
@@ -2701,6 +2775,69 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RunView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    ai_traces_api_v1_runs__run_id__ai_traces_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AITraceSummary"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    ai_trace_api_v1_runs__run_id__ai_traces__trace_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+                trace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AITraceDetail"];
                 };
             };
             /** @description Validation Error */

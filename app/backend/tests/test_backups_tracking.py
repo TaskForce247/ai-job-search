@@ -186,7 +186,8 @@ def test_restore_rejects_case_collisions_before_extracting(confirmed):
     assert caught.value.code == "invalid_backup"
 
 
-def test_restore_rejects_database_triggers_even_with_valid_checksums(confirmed, tmp_path):
+@pytest.mark.parametrize("legacy", [False, True])
+def test_restore_checks_schema_and_accepts_backups_before_ai_traces(confirmed, tmp_path, legacy):
     service = BackupService(confirmed)
     artifact = confirmed.store.artifact(service.create("snapshot"))
     database = tmp_path / "modified.sqlite3"
@@ -196,7 +197,10 @@ def test_restore_rejects_database_triggers_even_with_valid_checksums(confirmed, 
     database.write_bytes(files[".app/state.sqlite3"])
     connection = sqlite3.connect(database)
     try:
-        connection.execute("CREATE TRIGGER unexpected AFTER INSERT ON runs BEGIN DELETE FROM settings; END")
+        if legacy:
+            connection.execute("DROP TABLE ai_traces")
+        else:
+            connection.execute("CREATE TRIGGER unexpected AFTER INSERT ON runs BEGIN DELETE FROM settings; END")
         connection.commit()
     finally:
         connection.close()
@@ -207,9 +211,12 @@ def test_restore_rejects_database_triggers_even_with_valid_checksums(confirmed, 
         for name, content in files.items():
             archive.writestr(name, content)
         archive.writestr("manifest.json", encoded(manifest))
-    with pytest.raises(AppError) as caught:
-        service.inspect(output.getvalue())
-    assert caught.value.code == "unsupported_backup"
+    if legacy:
+        assert service.inspect(output.getvalue())["confirmation"] == "RESTORE"
+    else:
+        with pytest.raises(AppError) as caught:
+            service.inspect(output.getvalue())
+        assert caught.value.code == "unsupported_backup"
 
 
 def test_external_tracker_edit_during_outcome_is_not_lost(confirmed, monkeypatch):
